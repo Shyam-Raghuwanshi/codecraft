@@ -9,3 +9,10 @@ export { default as ErrorCard, type ErrorCardProps } from './ErrorCard';
 export { default as ReviewCard, type ReviewCardProps } from './ReviewCard';
 export { default as LoadingSpinner, LoadingDots, InlineSpinner } from './LoadingSpinner';
 export { default as ErrorBoundary, useErrorHandler } from './ErrorBoundary';
+export { 
+  NotificationContainer, 
+  NotificationItem, 
+  NotificationBell, 
+  showNotification, 
+  notifications 
+} from './NotificationContainer';

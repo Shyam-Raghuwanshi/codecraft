@@ -5,7 +5,15 @@ import { Id } from "./_generated/dataModel";
 // === USER MANAGEMENT ===
 
 /**
- * Save or update user information when they sign in with Clerk
+ * Save or update        } catch (error) {
+      console.error("Error saving review:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      throw new Error(`Failed to save review: ${errorMessage}`);
+    }tch (error) {
+      console.error("Error saving review:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      throw new Error(`Failed to save review: ${errorMessage}`);
+    }r information when they sign in with Clerk
  */
 export const saveUserReview = mutation({
   args: {
@@ -136,7 +144,8 @@ export const saveReview = mutation({
       return reviewId;
     } catch (error) {
       console.error("Error saving review:", error);
-      throw new Error(`Failed to save review: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      throw new Error(`Failed to save review: ${errorMessage}`);
     }
   },
 });
@@ -182,7 +191,7 @@ export const saveUserReviewToList = mutation({
       });
 
       return savedReviewId;
-    } catch (error) {
+    } catch (error:any) {
       console.error("Error saving review to list:", error);
       throw new Error(`Failed to save review: ${error.message}`);
     }
@@ -225,7 +234,8 @@ export const removeSavedReview = mutation({
       return { success: true };
     } catch (error) {
       console.error("Error removing saved review:", error);
-      throw new Error(`Failed to remove saved review: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      throw new Error(`Failed to remove saved review: ${errorMessage}`);
     }
   },
 });
@@ -312,7 +322,7 @@ export const getSavedReviews = query({
 });
 
 /**
- * Get review statistics for user dashboard
+ * Get review statistics for user dashboard (Real-time enabled)
  */
 export const getReviewStats = query({
   args: {
@@ -336,6 +346,7 @@ export const getReviewStats = query({
           avgCodeQuality: 0,
           savedReviews: 0,
           recentActivity: [],
+          lastUpdated: Date.now(),
         };
       }
 
@@ -394,10 +405,139 @@ export const getReviewStats = query({
         avgCodeQuality,
         savedReviews: savedReviews.length,
         recentActivity,
+        lastUpdated: Date.now(), // Add timestamp for real-time tracking
       };
     } catch (error) {
       console.error("Error getting review stats:", error);
       throw new Error("Failed to get review statistics");
+    }
+  },
+});
+
+/**
+ * Get recent reviews for dashboard (Real-time enabled)
+ */
+export const getRecentReviews = query({
+  args: {
+    clerkId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { clerkId, limit = 10 }) => {
+    try {
+      // Find user
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
+        .first();
+
+      if (!user) {
+        return [];
+      }
+
+      // Get recent reviews with limit
+      const reviews = await ctx.db
+        .query("reviews")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .take(limit);
+
+      return reviews.map((review) => ({
+        ...review,
+        timeAgo: Date.now() - review.createdAt, // For relative time calculations
+      }));
+    } catch (error) {
+      console.error("Error getting recent reviews:", error);
+      throw new Error("Failed to get recent reviews");
+    }
+  },
+});
+
+/**
+ * Get repository specific data for real-time updates
+ */
+export const getRepoData = query({
+  args: {
+    clerkId: v.string(),
+    repoName: v.string(),
+  },
+  handler: async (ctx, { clerkId, repoName }) => {
+    try {
+      // Find user
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
+        .first();
+
+      if (!user) {
+        return null;
+      }
+
+      // Get latest review for this repository
+      const latestReview = await ctx.db
+        .query("reviews")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .filter((q) => q.eq(q.field("repoName"), repoName))
+        .order("desc")
+        .first();
+
+      if (!latestReview) {
+        return null;
+      }
+
+      return {
+        ...latestReview,
+        hasNewIssues: (Date.now() - latestReview.createdAt) < 300000, // New if within 5 minutes
+        issueCount: latestReview.reviewData.summary.totalIssues,
+        criticalCount: latestReview.reviewData.summary.criticalIssues,
+        lastAnalysis: latestReview.createdAt,
+      };
+    } catch (error) {
+      console.error("Error getting repo data:", error);
+      throw new Error("Failed to get repository data");
+    }
+  },
+});
+
+/**
+ * Get notification count for user (unread issues, new reviews etc.)
+ */
+export const getNotificationCount = query({
+  args: {
+    clerkId: v.string(),
+  },
+  handler: async (ctx, { clerkId }) => {
+    try {
+      // Find user
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
+        .first();
+
+      if (!user) {
+        return { newReviews: 0, criticalIssues: 0, totalNotifications: 0 };
+      }
+
+      // Get reviews from last 24 hours
+      const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+      const recentReviews = await ctx.db
+        .query("reviews")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .filter((q) => q.gt(q.field("createdAt"), oneDayAgo))
+        .collect();
+
+      // Count critical issues from recent reviews
+      const criticalIssues = recentReviews.reduce((count, review) => {
+        return count + review.reviewData.summary.criticalIssues;
+      }, 0);
+
+      return {
+        newReviews: recentReviews.length,
+        criticalIssues,
+        totalNotifications: recentReviews.length + criticalIssues,
+      };
+    } catch (error) {
+      console.error("Error getting notification count:", error);
+      return { newReviews: 0, criticalIssues: 0, totalNotifications: 0 };
     }
   },
 });
@@ -448,7 +588,8 @@ export const getReview = query({
       };
     } catch (error) {
       console.error("Error getting review:", error);
-      throw new Error(`Failed to get review: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      throw new Error(`Failed to get review: ${errorMessage}`);
     }
   },
 });
