@@ -1,10 +1,11 @@
 /**
- * ReviewCard.tsx - Reusable ReviewCard Component for CodeCraft
- * Following CodeCraft rules: TypeScript types, save functionality, proper error handling, accessibility
+ * ReviewCard.tsx - Production-Ready ReviewCard Component for CodeCraft
+ * Following CodeCraft rules: TypeScript types, dark theme, hover effects, accessibility, error handling
  */
 
 import React, { useState } from 'react';
 import Badge from './Badge';
+import { SaveIcon, ClockIcon, CheckIcon, FileCodeIcon, ErrorIcon } from '../lib/icons';
 import type { CodeRabbitReview } from '../lib/mock-data';
 
 export interface ReviewCardProps {
@@ -12,6 +13,7 @@ export interface ReviewCardProps {
   onSave: (review: CodeRabbitReview) => void | Promise<void>;
   className?: string;
   isLoading?: boolean;
+  variant?: 'default' | 'compact';
 }
 
 /**
@@ -39,12 +41,23 @@ const formatFilePath = (filePath: string): string => {
 const formatDate = (dateString: string): string => {
   try {
     const date = new Date(dateString);
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) {
+      return 'Just now';
+    } else if (diffInHours < 24) {
+      return `${diffInHours}h ago`;
+    } else if (diffInHours < 24 * 7) {
+      const days = Math.floor(diffInHours / 24);
+      return `${days}d ago`;
+    } else {
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+      }).format(date);
+    }
   } catch (error) {
     console.error('Error formatting date:', error);
     return 'Unknown time';
@@ -52,46 +65,97 @@ const formatDate = (dateString: string): string => {
 };
 
 /**
- * Get status badge color based on review status
+ * Get status icon and styling
  */
-const getStatusColor = (status: CodeRabbitReview['status']): string => {
+const getStatusDisplay = (status: CodeRabbitReview['status']) => {
   switch (status) {
     case 'open':
-      return 'bg-blue-100 text-blue-800 border-blue-200';
+      return {
+        icon: <ClockIcon size="xs" color="warning" />,
+        label: 'Open',
+        className: 'bg-amber-900/50 text-amber-100 border-amber-700'
+      };
     case 'resolved':
-      return 'bg-green-100 text-green-800 border-green-200';
+      return {
+        icon: <CheckIcon size="xs" color="success" />,
+        label: 'Resolved',
+        className: 'bg-green-900/50 text-green-100 border-green-700'
+      };
     case 'dismissed':
-      return 'bg-gray-100 text-gray-800 border-gray-200';
+      return {
+        icon: null,
+        label: 'Dismissed',
+        className: 'bg-slate-700/50 text-slate-300 border-slate-600'
+      };
     default:
-      return 'bg-gray-100 text-gray-800 border-gray-200';
+      return {
+        icon: <ClockIcon size="xs" color="secondary" />,
+        label: 'Unknown',
+        className: 'bg-slate-700/50 text-slate-300 border-slate-600'
+      };
   }
 };
 
 /**
  * Code snippet component with syntax highlighting-like styling
  */
-const CodeSnippet: React.FC<{ code: string }> = ({ code }) => {
+const CodeSnippet: React.FC<{ code: string; isCompact?: boolean }> = ({ code, isCompact = false }) => {
   if (!code) return null;
 
   return (
-    <div className="mt-4">
-      <h4 className="text-sm font-medium text-gray-700 mb-2">Code:</h4>
-      <pre className="bg-gray-900 text-gray-100 text-sm p-4 rounded-md overflow-x-auto border">
-        <code>{code}</code>
-      </pre>
+    <div className={`${isCompact ? 'mt-2' : 'mt-4'}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <FileCodeIcon size="xs" color="secondary" />
+        <h4 className="text-sm font-medium text-slate-300">Code:</h4>
+      </div>
+      <div className="code-block max-h-40 overflow-y-auto custom-scrollbar">
+        <code className="text-sm">{code}</code>
+      </div>
     </div>
   );
 };
 
 /**
- * ReviewCard Component
- * Displays CodeRabbit review information with save functionality
+ * Suggestion component with enhanced styling
+ */
+const SuggestionBlock: React.FC<{ suggestion: string; isCompact?: boolean }> = ({ suggestion, isCompact = false }) => {
+  if (!suggestion) return null;
+
+  return (
+    <div className={`${isCompact ? 'mt-2' : 'mt-4'} relative`}>
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full"></div>
+      <div className="pl-4 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg backdrop-blur-sm">
+        <h4 className="text-sm font-medium text-blue-300 mb-2 flex items-center gap-2">
+          💡 Suggestion:
+        </h4>
+        <p className="text-slate-200 leading-relaxed text-sm">{suggestion}</p>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Error display component
+ */
+const ErrorDisplay: React.FC<{ error: string }> = ({ error }) => (
+  <div className="mt-4 p-3 bg-red-900/20 border border-red-700 rounded-lg backdrop-blur-sm">
+    <div className="flex items-center gap-2">
+      <ErrorIcon size="sm" color="error" />
+      <p className="text-sm text-red-300">{error}</p>
+    </div>
+  </div>
+);
+
+/**
+ * Production ReviewCard Component
+ * Displays CodeRabbit review information with dark theme and smooth animations
  */
 export const ReviewCard: React.FC<ReviewCardProps> = ({ 
   review, 
   onSave, 
   className = '',
-  isLoading = false 
+  isLoading = false,
+  variant = 'default'
 }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -120,6 +184,11 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
       status
     } = review;
 
+    const statusDisplay = getStatusDisplay(status);
+    const isCompact = variant === 'compact';
+    const isResolved = status === 'resolved';
+    const canSave = !isResolved && !isSaving && !isLoading;
+
     /**
      * Handle save button click
      */
@@ -141,9 +210,10 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
     };
 
     return (
-      <div
+      <article
         className={`
-          bg-white rounded-lg border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all duration-200
+          card card-hover group animate-fade-in backdrop-blur-sm
+          ${isCompact ? 'p-4' : 'p-6'}
           ${className}
         `.trim()}
         role="article"
@@ -151,112 +221,108 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
       >
         {/* Review Header */}
         <div className="flex items-start justify-between mb-4">
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 space-y-2">
             {/* File and Line */}
-            <div className="flex items-center space-x-2 mb-2">
-              <h3 className="text-lg font-semibold text-gray-900 truncate">
-                {formatFilePath(fileName)}
-              </h3>
-              <span className="text-sm text-gray-500">
-                Line {line}
-              </span>
+            <div className="flex items-center space-x-3">
+              <FileCodeIcon size="sm" color="primary" />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-lg font-semibold text-slate-100 truncate group-hover:text-blue-300 transition-colors">
+                  {formatFilePath(fileName)}
+                </h3>
+                <p className="text-sm text-slate-400">
+                  Line {line} • {formatDate(createdAt)}
+                </p>
+              </div>
             </div>
-            
-            {/* Date */}
-            <p className="text-sm text-gray-500">{formatDate(createdAt)}</p>
           </div>
           
           {/* Badges */}
-          <div className="flex flex-col space-y-2 ml-4">
-            <Badge type={severity} />
-            <Badge type={issueType} />
-            <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${getStatusColor(status)}`}>
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </span>
+          <div className="flex flex-col gap-2 ml-4">
+            <Badge 
+              type={severity} 
+              showIcon={!isCompact}
+              variant="solid"
+              size={isCompact ? 'sm' : 'md'}
+            />
+            <Badge 
+              type={issueType} 
+              showIcon={!isCompact}
+              variant="outline"
+              size={isCompact ? 'sm' : 'md'}
+            />
+            <div className={`
+              inline-flex items-center gap-1.5 px-2.5 py-1 
+              text-xs font-medium rounded-full border transition-all duration-200
+              ${statusDisplay.className}
+            `}>
+              {statusDisplay.icon}
+              <span>{statusDisplay.label}</span>
+            </div>
           </div>
         </div>
 
         {/* Issue Message */}
-        <div className="mb-4">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">Issue:</h4>
-          <p className="text-gray-900 leading-relaxed">{message}</p>
+        <div className={`${isCompact ? 'mb-3' : 'mb-4'}`}>
+          <h4 className="text-sm font-medium text-slate-300 mb-2 flex items-center gap-2">
+            🔍 Issue:
+          </h4>
+          <p className="text-slate-100 leading-relaxed">{message}</p>
         </div>
 
         {/* Suggestion */}
-        {suggestion && (
-          <div className="mb-4 p-4 bg-blue-50 border-l-4 border-blue-400 rounded-r-md">
-            <h4 className="text-sm font-medium text-blue-800 mb-2">Suggestion:</h4>
-            <p className="text-blue-700 leading-relaxed">{suggestion}</p>
-          </div>
-        )}
+        {suggestion && <SuggestionBlock suggestion={suggestion} isCompact={isCompact} />}
 
         {/* Code Snippet */}
-        {codeSnippet && <CodeSnippet code={codeSnippet} />}
+        {codeSnippet && <CodeSnippet code={codeSnippet} isCompact={isCompact} />}
 
         {/* Save Error */}
-        {saveError && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
-            <div className="flex items-center">
-              <svg className="h-4 w-4 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <p className="text-sm text-red-800">{saveError}</p>
-            </div>
-          </div>
-        )}
+        {saveError && <ErrorDisplay error={saveError} />}
 
-        {/* Save Button */}
-        <div className="mt-6 flex justify-end">
+        {/* Action Button */}
+        <div className={`${isCompact ? 'mt-4' : 'mt-6'} flex justify-end`}>
           <button
             onClick={handleSave}
-            disabled={isSaving || isLoading || status === 'resolved'}
+            disabled={!canSave}
             className={`
-              inline-flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
-              ${
-                isSaving || isLoading || status === 'resolved'
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }
+              btn btn-primary btn-md
+              ${!canSave ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg hover:shadow-blue-500/25'}
+              transition-all duration-300
             `.trim()}
             aria-label={`Save review for ${fileName}`}
           >
             {isSaving ? (
               <>
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+                <div className="loading-spinner mr-2" />
                 Saving...
               </>
-            ) : status === 'resolved' ? (
-              'Resolved'
+            ) : isResolved ? (
+              <>
+                <CheckIcon size="sm" color="white" />
+                Resolved
+              </>
             ) : (
               <>
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
+                <SaveIcon size="sm" color="white" />
                 Save Review
               </>
             )}
           </button>
         </div>
-      </div>
+      </article>
     );
   } catch (error) {
     console.error('Error rendering ReviewCard component:', error);
     
     // Fallback review card
     return (
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <div className="flex items-center">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium text-gray-900">Error loading review</h3>
-            <p className="text-sm text-gray-500">There was a problem displaying this review information.</p>
+      <div className="card p-6 border-red-500/50">
+        <div className="flex items-center gap-3">
+          <ErrorIcon size="md" color="error" />
+          <div>
+            <h3 className="text-sm font-medium text-red-300">Error loading review</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              There was a problem displaying this review information.
+            </p>
           </div>
         </div>
       </div>

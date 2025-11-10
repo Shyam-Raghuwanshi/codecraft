@@ -1,6 +1,7 @@
 import { createRootRoute, Link, Outlet, useNavigate } from '@tanstack/react-router'
 import { ClerkProvider, UserButton, useAuth } from '@clerk/clerk-react'
 import { useEffect } from 'react'
+import { HomeIcon, UserIcon } from '../lib/icons'
 import '../styles/globals.css'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -27,50 +28,68 @@ function AuthenticatedApp() {
   // Show loading while Clerk is initializing
   if (!isLoaded) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4 animate-fade-in">
+          <div className="loading-spinner w-12 h-12"></div>
+          <div className="text-slate-300 text-sm">Loading CodeCraft...</div>
+        </div>
       </div>
     )
   }
   
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-900 text-slate-50">
+      {/* Navigation */}
+      <nav className="glass-strong border-b border-slate-700/50 sticky top-0 z-50 backdrop-blur-md">
+        <div className="container">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <Link to="/" className="flex items-center space-x-2">
-                <span className="text-2xl font-bold text-blue-600">CodeCraft</span>
+              <Link to="/" className="flex items-center space-x-3 group">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
+                  <span className="text-white font-bold text-lg">C</span>
+                </div>
+                <span className="heading-1 text-xl">CodeCraft</span>
               </Link>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-6">
               {isSignedIn ? (
                 <>
                   <Link 
                     to="/" 
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
+                    className="nav-link flex items-center gap-2"
+                    activeProps={{
+                      className: "nav-link-active"
+                    }}
                   >
+                    <HomeIcon size="sm" />
                     Dashboard
                   </Link>
-                  <UserButton 
-                    afterSignOutUrl="/signin"
-                    appearance={{
-                      elements: {
-                        avatarBox: "h-8 w-8"
-                      }
-                    }}
-                  />
+                  
+                  <div className="relative">
+                    <UserButton 
+                      afterSignOutUrl="/signin"
+                      appearance={{
+                        elements: {
+                          avatarBox: "h-8 w-8 ring-2 ring-blue-500/30 hover:ring-blue-400 transition-all",
+                          userButtonPopoverCard: "bg-slate-800 border-slate-700",
+                          userButtonPopoverFooter: "bg-slate-800",
+                          userButtonPopoverActionButton: "text-slate-200 hover:bg-slate-700"
+                        }
+                      }}
+                    />
+                  </div>
                 </>
               ) : (
                 <>
                   <Link to="/signin">
-                    <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                    <button className="btn btn-primary btn-md">
+                      <UserIcon size="sm" />
                       Sign In
                     </button>
                   </Link>
                   <Link to="/signin">
-                    <button className="border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                    <button className="btn btn-secondary btn-md">
                       Sign Up
                     </button>
                   </Link>
@@ -81,9 +100,39 @@ function AuthenticatedApp() {
         </div>
       </nav>
       
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <Outlet />
+      {/* Main Content */}
+      <main className="container py-8">
+        <div className="animate-fade-in">
+          <Outlet />
+        </div>
       </main>
+      
+      {/* Footer */}
+      <footer className="border-t border-slate-700/50 mt-16">
+        <div className="container py-8">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-500 rounded-md flex items-center justify-center">
+                <span className="text-white font-bold text-sm">C</span>
+              </div>
+              <span className="text-slate-400 text-sm">
+                © 2024 CodeCraft. Built with 💙 for developers.
+              </span>
+            </div>
+            <div className="flex items-center space-x-6 text-sm">
+              <a href="#" className="text-slate-400 hover:text-blue-400 transition-colors">
+                About
+              </a>
+              <a href="#" className="text-slate-400 hover:text-blue-400 transition-colors">
+                Documentation
+              </a>
+              <a href="#" className="text-slate-400 hover:text-blue-400 transition-colors">
+                Support
+              </a>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
