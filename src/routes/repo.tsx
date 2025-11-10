@@ -6,6 +6,7 @@
  * - CodeRabbit AI reviews (left column)
  * - Sentry errors (right column)
  * - Interactive features and real-time updates
+ * - Loading, error, and empty states
  */
 
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
@@ -27,10 +28,12 @@ import {
   XCircleIcon,
   InformationCircleIcon
 } from '@heroicons/react/24/outline'
+import { LoadingSpinner, ErrorBoundary } from '../components'
 import { 
   getMockRepoByName, 
   getMockCodeRabbitReviews, 
   getMockSentryErrors,
+  simulateApiDelay,
   type CodeRabbitReview,
   type SentryError,
   type MockRepository
@@ -347,8 +350,22 @@ function RepositoryPage() {
   const [sentryErrors, setSentryErrors] = useState<SentryError[]>([])
   const [expandedReviews, setExpandedReviews] = useState<Set<string>>(new Set())
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
-  const [isLoading, setIsLoading] = useState(true)
-  const [isGeneratingReview, setIsGeneratingReview] = useState(false)
+  
+  // Loading states
+  const [loading, setLoading] = useState({
+    initial: true,
+    reviews: false,
+    errors: false,
+    generating: false
+  })
+  
+  // Error states
+  const [errors, setErrors] = useState({
+    repository: null as string | null,
+    reviews: null as string | null,
+    errors: null as string | null,
+    generating: null as string | null
+  })
 
   // Check authentication and repo name
   useEffect(() => {
@@ -363,46 +380,111 @@ function RepositoryPage() {
     }
   }, [isSignedIn, repoName, navigate])
 
+  // Load repository data with error handling
+  const loadRepositoryData = async () => {
+    try {
+      setLoading(prev => ({ ...prev, initial: true }))
+      setErrors({ repository: null, reviews: null, errors: null, generating: null })
+      
+      // Simulate API loading delay
+      await simulateApiDelay(1000)
+      
+      if (!repoName) {
+        throw new Error('Repository name is required')
+      }
+      
+      // Fetch repository data
+      const repo = getMockRepoByName(repoName)
+      if (!repo) {
+        throw new Error(`Repository '${repoName}' not found`)
+      }
+      
+      setRepository(repo)
+      
+      // Load reviews and errors in parallel
+      await Promise.all([
+        loadReviews(repoName),
+        loadErrors(repoName)
+      ])
+      
+    } catch (error) {
+      console.error('Error loading repository data:', error)
+      setErrors(prev => ({ 
+        ...prev, 
+        repository: error instanceof Error ? error.message : 'Failed to load repository data'
+      }))
+    } finally {
+      setLoading(prev => ({ ...prev, initial: false }))
+    }
+  }
+
+  // Load CodeRabbit reviews with error handling
+  const loadReviews = async (name: string) => {
+    try {
+      setLoading(prev => ({ ...prev, reviews: true }))
+      setErrors(prev => ({ ...prev, reviews: null }))
+      
+      await simulateApiDelay(800)
+      const reviews = getMockCodeRabbitReviews(name)
+      setCodeRabbitReviews(reviews)
+      
+    } catch (error) {
+      console.error('Error loading reviews:', error)
+      setErrors(prev => ({ 
+        ...prev, 
+        reviews: 'Failed to load CodeRabbit reviews. Please check your connection and try again.'
+      }))
+    } finally {
+      setLoading(prev => ({ ...prev, reviews: false }))
+    }
+  }
+
+  // Load Sentry errors with error handling
+  const loadErrors = async (name: string) => {
+    try {
+      setLoading(prev => ({ ...prev, errors: true }))
+      setErrors(prev => ({ ...prev, errors: null }))
+      
+      await simulateApiDelay(600)
+      const sentryData = getMockSentryErrors(name)
+      setSentryErrors(sentryData)
+      
+    } catch (error) {
+      console.error('Error loading Sentry errors:', error)
+      setErrors(prev => ({ 
+        ...prev, 
+        errors: 'Failed to load Sentry errors. Please check your connection and try again.'
+      }))
+    } finally {
+      setLoading(prev => ({ ...prev, errors: false }))
+    }
+  }
+
+  // Retry functions
+  const retryRepositoryData = () => {
+    if (repoName) {
+      loadRepositoryData()
+    }
+  }
+
+  const retryReviews = () => {
+    if (repoName) {
+      loadReviews(repoName)
+    }
+  }
+
+  const retryErrors = () => {
+    if (repoName) {
+      loadErrors(repoName)
+    }
+  }
+
   // Load repository data on mount
   useEffect(() => {
-    const loadRepositoryData = async () => {
-      try {
-        setIsLoading(true)
-        
-        // Simulate API loading delay
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        if (!repoName) {
-          throw new Error('Repository name is required')
-        }
-        
-        // Fetch repository data
-        const repo = getMockRepoByName(repoName)
-        if (!repo) {
-          throw new Error(`Repository '${repoName}' not found`)
-        }
-        
-        // Fetch reviews and errors
-        const reviews = getMockCodeRabbitReviews(repoName)
-        const errors = getMockSentryErrors(repoName)
-        
-        setRepository(repo)
-        setCodeRabbitReviews(reviews)
-        setSentryErrors(errors)
-        
-      } catch (error) {
-        console.error('Error loading repository data:', error)
-        // Navigate back to dashboard on error
-        navigate({ to: '/' })
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
     if (isSignedIn && repoName) {
       loadRepositoryData()
     }
-  }, [repoName, navigate, isSignedIn])
+  }, [repoName, isSignedIn])
 
   // Toggle expanded state for reviews
   const toggleReviewExpanded = (reviewId: string) => {
@@ -430,28 +512,25 @@ function RepositoryPage() {
     })
   }
 
-  // Save review to Convex (simulated)
+  // Save review to Convex with error handling
   const handleSaveReview = async (review: CodeRabbitReview) => {
     try {
-      // In a real app, this would save to Convex database
       console.log('Saving review to database:', review.reviewId)
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
+      await simulateApiDelay(500)
     } catch (error) {
       console.error('Error saving review:', error)
       throw error
     }
   }
 
-  // Generate new review (mock)
+  // Generate new review with error handling
   const handleGenerateNewReview = async () => {
     try {
-      setIsGeneratingReview(true)
+      setLoading(prev => ({ ...prev, generating: true }))
+      setErrors(prev => ({ ...prev, generating: null }))
       
       // Simulate AI analysis delay
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await simulateApiDelay(2000)
       
       // Create a new mock review
       const newReview: CodeRabbitReview = {
@@ -476,8 +555,12 @@ function RepositoryPage() {
       
     } catch (error) {
       console.error('Error generating new review:', error)
+      setErrors(prev => ({ 
+        ...prev, 
+        generating: 'Failed to generate new review. Please try again.'
+      }))
     } finally {
-      setIsGeneratingReview(false)
+      setLoading(prev => ({ ...prev, generating: false }))
     }
   }
 
@@ -524,14 +607,48 @@ function RepositoryPage() {
     )
   }
 
-  if (isLoading) {
+  if (loading.initial) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading repository analysis...</p>
+      <ErrorBoundary>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <LoadingSpinner size="lg" message="Loading repository analysis..." />
+          </div>
         </div>
-      </div>
+      </ErrorBoundary>
+    )
+  }
+
+  if (errors.repository) {
+    return (
+      <ErrorBoundary>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center max-w-md">
+            <div className="flex items-center justify-center w-16 h-16 mx-auto bg-red-100 rounded-full mb-4">
+              <XCircleIcon className="w-8 h-8 text-red-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Repository Error</h2>
+            <p className="text-gray-600 mb-4">{errors.repository}</p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={retryRepositoryData}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                         transition-colors duration-200"
+              >
+                Try Again
+              </button>
+              <Link to="/">
+                <button className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 
+                               focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2
+                               transition-colors duration-200">
+                  Back to Dashboard
+                </button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </ErrorBoundary>
     )
   }
 
@@ -555,8 +672,9 @@ function RepositoryPage() {
   const stats = summaryStats()
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Repository Header */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
           <div className="flex items-center justify-between">
@@ -605,16 +723,16 @@ function RepositoryPage() {
               </h2>
               <button
                 onClick={handleGenerateNewReview}
-                disabled={isGeneratingReview}
+                disabled={loading.generating}
                 className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  isGeneratingReview
+                  loading.generating
                     ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
                     : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               >
-                {isGeneratingReview ? (
+                {loading.generating ? (
                   <>
-                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full inline-block mr-2"></div>
+                    <LoadingSpinner size="sm" className="inline-block mr-2" />
                     Generating...
                   </>
                 ) : (
@@ -623,25 +741,60 @@ function RepositoryPage() {
               </button>
             </div>
             
-            <div className="space-y-4 max-h-[600px] overflow-y-auto">
-              {codeRabbitReviews.length === 0 ? (
-                <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
-                  <CheckCircleIcon className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                  <p className="text-gray-600">No code reviews found</p>
-                  <p className="text-sm text-gray-500">This repository is in excellent shape!</p>
+            {loading.reviews ? (
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <LoadingSpinner message="Loading CodeRabbit reviews..." />
+              </div>
+            ) : errors.reviews ? (
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="text-center">
+                  <div className="flex items-center justify-center w-12 h-12 mx-auto bg-red-100 rounded-full mb-4">
+                    <ExclamationTriangleIcon className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    Unable to Load Reviews
+                  </h3>
+                  <p className="text-gray-600 mb-4">{errors.reviews}</p>
+                  <button
+                    onClick={retryReviews}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 
+                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                             transition-colors duration-200"
+                  >
+                    Retry
+                  </button>
                 </div>
-              ) : (
-                codeRabbitReviews.map(review => (
-                  <CodeRabbitCard
-                    key={review.reviewId}
-                    review={review}
-                    onSaveReview={handleSaveReview}
-                    onToggleExpanded={toggleReviewExpanded}
-                    isExpanded={expandedReviews.has(review.reviewId)}
-                  />
-                ))
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                {codeRabbitReviews.length === 0 ? (
+                  <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
+                    <CheckCircleIcon className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                    <p className="text-gray-600">No code reviews found</p>
+                    <p className="text-sm text-gray-500">This repository is in excellent shape!</p>
+                  </div>
+                ) : (
+                  codeRabbitReviews.map(review => (
+                    <CodeRabbitCard
+                      key={review.reviewId}
+                      review={review}
+                      onSaveReview={handleSaveReview}
+                      onToggleExpanded={toggleReviewExpanded}
+                      isExpanded={expandedReviews.has(review.reviewId)}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {errors.generating && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-4">
+                <div className="flex items-center">
+                  <ExclamationTriangleIcon className="w-5 h-5 text-red-600 mr-2" />
+                  <p className="text-sm text-red-700">{errors.generating}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* RIGHT COLUMN - Sentry Errors */}
@@ -653,24 +806,50 @@ function RepositoryPage() {
               </span>
             </h2>
             
-            <div className="space-y-4 max-h-[600px] overflow-y-auto">
-              {sentryErrors.length === 0 ? (
-                <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
-                  <CheckCircleIcon className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                  <p className="text-gray-600">No errors detected</p>
-                  <p className="text-sm text-gray-500">Your application is running smoothly!</p>
+            {loading.errors ? (
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <LoadingSpinner message="Loading Sentry errors..." />
+              </div>
+            ) : errors.errors ? (
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="text-center">
+                  <div className="flex items-center justify-center w-12 h-12 mx-auto bg-red-100 rounded-full mb-4">
+                    <ExclamationTriangleIcon className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    Unable to Load Errors
+                  </h3>
+                  <p className="text-gray-600 mb-4">{errors.errors}</p>
+                  <button
+                    onClick={retryErrors}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 
+                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                             transition-colors duration-200"
+                  >
+                    Retry
+                  </button>
                 </div>
-              ) : (
-                sentryErrors.map(error => (
-                  <SentryErrorCard
-                    key={error.errorId}
-                    error={error}
-                    onToggleExpanded={toggleErrorExpanded}
-                    isExpanded={expandedErrors.has(error.errorId)}
-                  />
-                ))
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                {sentryErrors.length === 0 ? (
+                  <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
+                    <CheckCircleIcon className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                    <p className="text-gray-600">No errors detected</p>
+                    <p className="text-sm text-gray-500">Your application is running smoothly!</p>
+                  </div>
+                ) : (
+                  sentryErrors.map(error => (
+                    <SentryErrorCard
+                      key={error.errorId}
+                      error={error}
+                      onToggleExpanded={toggleErrorExpanded}
+                      isExpanded={expandedErrors.has(error.errorId)}
+                    />
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -701,8 +880,9 @@ function RepositoryPage() {
             </p>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   )
 }
 
