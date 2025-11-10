@@ -8,9 +8,12 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
     "convex:dev": "npx convex dev",
     "convex:deploy": "npx convex deploy",
-    "convex:sync": "npx convex dev --once"
+    "convex:sync": "npx convex dev --once",
+    "deploy": "npm run build && npm run convex:deploy"
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.53.8",
