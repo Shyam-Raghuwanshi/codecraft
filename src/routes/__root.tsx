@@ -1,14 +1,7 @@
 import { createRootRoute, Link, Outlet, useNavigate } from '@tanstack/react-router'
-import { ClerkProvider, UserButton, useAuth } from '@clerk/clerk-react'
+import { UserButton, useAuth } from '@clerk/clerk-react'
 import { useEffect } from 'react'
 import { HomeIcon, UserIcon } from '../lib/icons'
-import '../styles/globals.css'
-
-const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-
-if (!PUBLISHABLE_KEY) {
-  throw new Error("Missing Publishable Key")
-}
 
 function AuthenticatedApp() {
   const { isSignedIn, isLoaded } = useAuth()
@@ -41,7 +34,7 @@ function AuthenticatedApp() {
     <div className="min-h-screen bg-slate-900 text-slate-50">
       {/* Navigation */}
       <nav className="glass-strong border-b border-slate-700/50 sticky top-0 z-50 backdrop-blur-md">
-        <div className="container">
+        <div className="w-full px-1 sm:px-2 md:px-3 lg:px-4">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <Link to="/" className="flex items-center space-x-3 group">
@@ -101,15 +94,13 @@ function AuthenticatedApp() {
       </nav>
       
       {/* Main Content */}
-      <main className="container py-8">
-        <div className="animate-fade-in">
+              <main className="flex-1 w-screen">
           <Outlet />
-        </div>
-      </main>
+        </main>
       
       {/* Footer */}
       <footer className="border-t border-slate-700/50 mt-16">
-        <div className="container py-8">
+        <div className="w-full px-1 sm:px-2 md:px-3 lg:px-4 py-8">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center space-x-3">
               <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-500 rounded-md flex items-center justify-center">
@@ -138,9 +129,5 @@ function AuthenticatedApp() {
 }
 
 export const Route = createRootRoute({
-  component: () => (
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-      <AuthenticatedApp />
-    </ClerkProvider>
-  )
+  component: () => <AuthenticatedApp />
 })

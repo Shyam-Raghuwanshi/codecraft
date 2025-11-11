@@ -291,19 +291,6 @@ const DashboardPage = () => {
             {user?.firstName || 'You have'} {dashboardStats.totalRepos} repositories under review
           </p>
         </div>
-        <div className="mt-4 sm:mt-0">
-          <UserButton 
-            afterSignOutUrl="/signin"
-            appearance={{
-              elements: {
-                avatarBox: "h-10 w-10 ring-2 ring-blue-500/30 hover:ring-blue-400 transition-all",
-                userButtonPopoverCard: "bg-slate-800 border-slate-700",
-                userButtonPopoverFooter: "bg-slate-800",
-                userButtonPopoverActionButton: "text-slate-200 hover:bg-slate-700"
-              }
-            }}
-          />
-        </div>
       </div>
 
       {/* Stats Section */}
@@ -365,7 +352,7 @@ const DashboardPage = () => {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
             {repositories.map((repo, index) => (
               <div key={repo.id} className="animation-delay-200" style={{ animationDelay: `${index * 100}ms` }}>
                 <RepositoryCard repository={repo} />
