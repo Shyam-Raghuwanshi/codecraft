@@ -1,18 +1,19 @@
 import { createRootRoute, Link, Outlet, useNavigate } from '@tanstack/react-router'
 import { UserButton, useAuth } from '@clerk/clerk-react'
 import { useEffect } from 'react'
-import { HomeIcon, UserIcon } from '../lib/icons'
+import { HomeIcon, UserIcon, StarIcon } from '../lib/icons'
 
 function AuthenticatedApp() {
   const { isSignedIn, isLoaded } = useAuth()
   const navigate = useNavigate()
   
-  // Redirect unauthenticated users to signin page
+  // Redirect unauthenticated users to signin page (except for public pages)
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
       const currentPath = window.location.pathname
-      // Don't redirect if already on signin page
-      if (currentPath !== '/signin') {
+      // Don't redirect if on public pages (signin or landing)
+      const publicPaths = ['/signin', '/landing']
+      if (!publicPaths.includes(currentPath)) {
         navigate({ to: '/signin' })
       }
     }
@@ -37,12 +38,21 @@ function AuthenticatedApp() {
         <div className="w-full px-1 sm:px-2 md:px-3 lg:px-4">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <Link to="/" className="flex items-center space-x-3 group">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
-                  <span className="text-white font-bold text-lg">C</span>
-                </div>
-                <span className="heading-1 text-xl">CodeCraft</span>
-              </Link>
+              {isSignedIn ? (
+                <Link to="/" className="flex items-center space-x-3 group">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
+                    <span className="text-white font-bold text-lg">C</span>
+                  </div>
+                  <span className="heading-1 text-xl">CodeCraft</span>
+                </Link>
+              ) : (
+                <a href="/landing" className="flex items-center space-x-3 group">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
+                    <span className="text-white font-bold text-lg">C</span>
+                  </div>
+                  <span className="heading-1 text-xl">CodeCraft</span>
+                </a>
+              )}
             </div>
             
             <div className="flex items-center space-x-6">
@@ -57,6 +67,18 @@ function AuthenticatedApp() {
                   >
                     <HomeIcon size="sm" />
                     Dashboard
+                  </Link>
+                  
+                  {/* Landing Page Link */}
+                  <Link 
+                    to="/landing"
+                    className="nav-link flex items-center gap-2"
+                    activeProps={{
+                      className: "nav-link-active"
+                    }}
+                  >
+                    <StarIcon size="sm" />
+                    Landing
                   </Link>
                   
                   <div className="relative">
@@ -75,6 +97,16 @@ function AuthenticatedApp() {
                 </>
               ) : (
                 <>
+                  <Link 
+                    to="/landing"
+                    className="nav-link flex items-center gap-2"
+                    activeProps={{
+                      className: "nav-link-active"
+                    }}
+                  >
+                    <StarIcon size="sm" />
+                    Landing
+                  </Link>
                   <Link to="/signin">
                     <button className="btn btn-primary btn-md">
                       <UserIcon size="sm" />
