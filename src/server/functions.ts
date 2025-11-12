@@ -1,11 +1,9 @@
 import axios, { AxiosError } from 'axios';
+import { ConvexHttpClient } from 'convex/browser';
+import { api } from '../../convex/_generated/api';
 
-// Note: Convex integration will be added once convex dev is running
-// import { api } from '../../convex/_generated/api';
-// import { ConvexHttpClient } from 'convex/browser';
-
-// Initialize Convex client (commented out until convex dev is running)
-// const convex = new ConvexHttpClient(import.meta.env.VITE_CONVEX_URL || '');
+// Initialize Convex client
+const convex = new ConvexHttpClient(import.meta.env.VITE_CONVEX_URL || '');
 
 // Type definitions for our data structures
 export interface CodeRabbitIssue {
@@ -338,40 +336,35 @@ export const saveReviewToDb = async (
       throw new Error('Invalid GitHub repository URL');
     }
     
-    // TODO: Uncomment when Convex dev server is running
     // First, ensure user exists in Convex
-    // await retryWithExponentialBackoff(async () => {
-    //   return await convex.mutation(api.functions.saveUserReview, {
-    //     clerkId,
-    //     email: 'user@example.com', // This should come from Clerk context
-    //   });
-    // });
+    await retryWithExponentialBackoff(async () => {
+      return await convex.mutation(api.functions.saveUserReview, {
+        clerkId,
+        email: 'user@example.com', // This should come from Clerk context
+      });
+    });
     
     // Save the review to Convex
-    // const reviewId = await retryWithExponentialBackoff(async () => {
-    //   return await convex.mutation(api.functions.saveReview, {
-    //     clerkId,
-    //     repoName,
-    //     repoUrl,
-    //     reviewData: {
-    //       summary: reviewData.summary,
-    //       issues: reviewData.issues,
-    //       sentryErrors: reviewData.sentryErrors,
-    //       analysisTimestamp: reviewData.analysisTimestamp,
-    //       toolsUsed: reviewData.toolsUsed,
-    //     },
-    //   });
-    // });
-    
-    // Mock implementation for development
-    const reviewId = `review_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const reviewId = await retryWithExponentialBackoff(async () => {
+      return await convex.mutation(api.functions.saveReview, {
+        clerkId,
+        repoName,
+        repoUrl,
+        reviewData: {
+          summary: reviewData.summary,
+          issues: reviewData.issues,
+          sentryErrors: reviewData.sentryErrors,
+          analysisTimestamp: reviewData.analysisTimestamp,
+          toolsUsed: reviewData.toolsUsed,
+        },
+      });
+    });
     
     console.log(`Review saved successfully: ${reviewId} for repo: ${repoName}`);
-    console.log('Review data:', JSON.stringify(reviewData, null, 2));
     
     return {
       success: true,
-      reviewId,
+      reviewId: reviewId.toString(),
     };
     
   } catch (error) {
@@ -397,74 +390,37 @@ export const getUserDashboard = async (clerkId: string): Promise<UserDashboard> 
       throw new Error('User ID is required');
     }
     
-    // TODO: Uncomment when Convex dev server is running
     // Get user stats from Convex with retry logic
-    // const [userStatsResult, userReviewsResult, savedReviewsResult] = await Promise.allSettled([
-    //   retryWithExponentialBackoff(() => convex.query(api.functions.getReviewStats, { clerkId })),
-    //   retryWithExponentialBackoff(() => convex.query(api.functions.getUserReviews, { clerkId })),
-    //   retryWithExponentialBackoff(() => convex.query(api.functions.getSavedReviews, { clerkId })),
-    // ]);
+    const [userStatsResult, userReviewsResult, savedReviewsResult] = await Promise.allSettled([
+      retryWithExponentialBackoff(() => convex.query(api.functions.getReviewStats, { clerkId })),
+      retryWithExponentialBackoff(() => convex.query(api.functions.getUserReviews, { clerkId })),
+      retryWithExponentialBackoff(() => convex.query(api.functions.getSavedReviews, { clerkId })),
+    ]);
     
     // Extract results, providing defaults for failed promises
-    // const userStats = userStatsResult.status === 'fulfilled' 
-    //   ? userStatsResult.value 
-    //   : {
-    //       totalReviews: 0,
-    //       totalIssuesFound: 0,
-    //       criticalIssues: 0,
-    //       majorIssues: 0,
-    //       minorIssues: 0,
-    //       avgCodeQuality: 0,
-    //       savedReviews: 0,
-    //       recentActivity: [],
-    //     };
+    const userStats = userStatsResult.status === 'fulfilled' 
+      ? userStatsResult.value 
+      : {
+          totalReviews: 0,
+          totalIssuesFound: 0,
+          criticalIssues: 0,
+          majorIssues: 0,
+          minorIssues: 0,
+          avgCodeQuality: 0,
+          savedReviews: 0,
+          recentActivity: [],
+        };
     
-    // const userReviews = userReviewsResult.status === 'fulfilled' 
-    //   ? userReviewsResult.value 
-    //   : [];
+    const userReviews = userReviewsResult.status === 'fulfilled' 
+      ? userReviewsResult.value 
+      : [];
     
-    // const savedReviews = savedReviewsResult.status === 'fulfilled' 
-    //   ? savedReviewsResult.value 
-    //   : [];
-    
-    // Mock implementation for development
-    const userStats = {
-      totalReviews: 5,
-      totalIssuesFound: 42,
-      criticalIssues: 3,
-      majorIssues: 15,
-      minorIssues: 24,
-      avgCodeQuality: 78,
-      savedReviews: 2,
-      recentActivity: [],
-    };
-    
-    const mockUserReviews = [
-      {
-        _id: 'review_1',
-        repoName: 'user/awesome-project',
-        reviewData: { summary: { totalIssues: 12 } },
-        createdAt: Date.now() - 86400000, // 1 day ago
-      },
-      {
-        _id: 'review_2',
-        repoName: 'user/another-repo',
-        reviewData: { summary: { totalIssues: 8 } },
-        createdAt: Date.now() - 172800000, // 2 days ago
-      },
-    ];
-    
-    const mockSavedReviews = [
-      {
-        reviewId: 'review_1',
-        review: { repoName: 'user/saved-project' },
-        notes: 'Important security fixes needed',
-        savedAt: Date.now() - 43200000, // 12 hours ago
-      },
-    ];
+    const savedReviews = savedReviewsResult.status === 'fulfilled' 
+      ? savedReviewsResult.value 
+      : [];
     
     // Format recent reviews
-    const recentReviews = mockUserReviews
+    const recentReviews = userReviews
       .slice(0, 5)
       .map(review => ({
         id: review._id,
@@ -474,7 +430,7 @@ export const getUserDashboard = async (clerkId: string): Promise<UserDashboard> 
       }));
     
     // Format saved reviews
-    const formattedSavedReviews = mockSavedReviews
+    const formattedSavedReviews = savedReviews
       .map(saved => ({
         id: saved.reviewId,
         repoName: saved.review?.repoName || 'Unknown',

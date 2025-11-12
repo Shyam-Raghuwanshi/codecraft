@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useAuth, useUser } from '@clerk/clerk-react'
-import { UserButton } from '@clerk/clerk-react'
+import React, { useState } from 'react'
 import { 
   GithubIcon, 
   StarIcon, 
@@ -12,19 +12,26 @@ import {
 } from '../lib/icons'
 import { StatCard } from '../components/StatCard'
 import { Badge } from '../components/Badge'
-import { getMockRepos, getMockDashboardStats, type MockRepository } from '../lib/mock-data'
-import { useState, useEffect } from 'react'
+import { AddRepositoryModal, showNotification } from '../components'
+import { analyzeRepo } from '../server/functions'
+import { useDashboardStats, useUserReviews, useSaveReview } from '../lib/convex-hooks'
 
 // Types following CodeCraft rules
-interface DashboardStats {
-  totalRepos: number
-  totalIssues: number
-  criticalBugs: number
-  resolvedIssues: number
+interface Repository {
+  id: string
+  name: string
+  owner: string
+  url: string
+  language: string
+  stars: number
+  description: string
+  lastUpdated: string
+  isPrivate: boolean
+  defaultBranch: string
 }
 
 interface RepositoryCardProps {
-  repository: MockRepository
+  repository: Repository
 }
 
 // Repository Card Component with dark theme
@@ -122,7 +129,7 @@ const WelcomeSection = () => (
   <div className="min-h-[80vh] flex flex-col items-center justify-center text-center px-4 animate-fade-in">
     <div className="max-w-4xl mx-auto">
       <div className="mb-12">
-        <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-float">
+        <div className="w-20 h-20 bg-linear-to-br from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-float">
           <span className="text-white font-bold text-3xl">C</span>
         </div>
         <h1 className="heading-1 mb-6">
@@ -212,57 +219,139 @@ const ErrorState: React.FC<{ error: string }> = ({ error }) => (
 
 // Main Dashboard Component
 const DashboardPage = () => {
-  const { isSignedIn } = useAuth()
+  const { isSignedIn, userId } = useAuth()
   const { user } = useUser()
   
+  // Use Convex hooks for real-time data
+  const { stats, isLoading: statsLoading, hasError: statsError, error: statsErrorMessage } = useDashboardStats()
+  const { reviews: allReviews, isLoading: reviewsLoading } = useUserReviews()
+  const { save: saveReview } = useSaveReview()
+  
   // State management following CodeCraft rules
-  const [repositories, setRepositories] = useState<MockRepository[]>([])
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
-    totalRepos: 0,
-    totalIssues: 0,
-    criticalBugs: 0,
-    resolvedIssues: 0
-  })
+  const [repositories, setRepositories] = useState<Repository[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  // Modal state for adding repositories
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
-  // Load data with error handling
-  useEffect(() => {
-    const loadDashboardData = async () => {
-      try {
-        setIsLoading(true)
-        setError(null)
+  // Convert reviews to repositories for display
+  const convertReviewsToRepositories = (reviews: any[]): Repository[] => {
+    return reviews.map((review, index) => {
+      const urlMatch = review.repoUrl?.match(/github\.com\/([^\/]+)\/([^\/]+)/) || []
+      const [, owner = 'unknown', name = `repo-${index}`] = urlMatch
+      
+      return {
+        id: review._id,
+        name,
+        owner,
+        url: review.repoUrl || '',
+        language: 'TypeScript', // Default, could be enhanced
+        stars: 0, // Could be fetched from GitHub API
+        description: `Repository analyzed with ${review.reviewData.summary.totalIssues} issues found`,
+        lastUpdated: new Date(review.createdAt).toISOString(),
+        isPrivate: false,
+        defaultBranch: 'main'
+      }
+    })
+  }
 
-        // Simulate loading delay for realistic UX
-        await new Promise(resolve => setTimeout(resolve, 800))
+  // Handle repository analysis
+  const handleAddRepository = async (repoUrl: string) => {
+    if (!userId) {
+      showNotification({
+        type: 'error',
+        title: 'Authentication Required',
+        message: 'Please sign in to add repositories.'
+      })
+      return
+    }
 
-        const mockRepos = getMockRepos()
-        const mockStats = getMockDashboardStats()
-
-        if (!mockRepos || mockRepos.length === 0) {
-          throw new Error('No repositories found')
+    try {
+      setIsAnalyzing(true)
+      
+      console.log('Analyzing repository:', repoUrl)
+      
+      // Call the analyze function
+      const result = await analyzeRepo(repoUrl)
+      
+      // Check if analysis returned data
+      if (result && result.codeRabbitReviews && result.sentryErrors) {
+        // Save the review using Convex
+        const reviewData = {
+          summary: result.metrics,
+          issues: result.codeRabbitReviews,
+          sentryErrors: result.sentryErrors,
+          analysisTimestamp: Date.now(),
+          toolsUsed: ['coderabbit', 'sentry']
         }
 
-        setRepositories(mockRepos.slice(0, 6)) // Show only first 6 repos
-        setDashboardStats({
-          totalRepos: mockStats.totalRepos,
-          totalIssues: mockStats.totalIssues,
-          criticalBugs: mockStats.criticalIssues || 0,
-          resolvedIssues: mockStats.resolvedErrors || 0
+        const urlMatch = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/)
+        let repositoryName = 'Repository'
+        
+        if (urlMatch) {
+          const [, owner, repoName] = urlMatch
+          repositoryName = repoName
+          
+          // Save to Convex database
+          await saveReview({
+            clerkId: userId,
+            repoName: `${owner}/${repoName}`,
+            repoUrl,
+            reviewData
+          })
+        }
+        
+        // Close modal
+        setIsModalOpen(false)
+        
+        console.log('Repository analysis completed successfully:', result)
+        
+        // Show success notification
+        showNotification({
+          type: 'success',
+          title: 'Repository Added Successfully',
+          message: `${repositoryName} has been analyzed and added to your dashboard.`
         })
-
-      } catch (err) {
-        console.error('Error loading dashboard data:', err)
-        setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
-      } finally {
-        setIsLoading(false)
+        
+      } else {
+        console.error('Repository analysis returned incomplete data:', result)
+        showNotification({
+          type: 'error',
+          title: 'Analysis Failed',
+          message: 'Failed to analyze repository completely. Please try again.'
+        })
       }
+      
+    } catch (error) {
+      console.error('Error adding repository:', error)
+      showNotification({
+        type: 'error',
+        title: 'Error Adding Repository',
+        message: 'Failed to add repository. Please check the URL and try again.'
+      })
+    } finally {
+      setIsAnalyzing(false)
     }
+  }
 
-    if (isSignedIn) {
-      loadDashboardData()
+  // Update repositories when reviews change
+  React.useEffect(() => {
+    if (allReviews) {
+      const repos = convertReviewsToRepositories(allReviews)
+      setRepositories(repos)
+      setIsLoading(false)
     }
-  }, [isSignedIn])
+  }, [allReviews])
+
+  // Handle loading and error states
+  React.useEffect(() => {
+    if (statsError || statsErrorMessage) {
+      setError(statsErrorMessage || 'Failed to load dashboard data')
+      setIsLoading(false)
+    }
+  }, [statsError, statsErrorMessage])
 
   // Redirect to signin if not authenticated
   if (!isSignedIn) {
@@ -270,13 +359,21 @@ const DashboardPage = () => {
   }
 
   // Show loading state
-  if (isLoading) {
+  if (isLoading || statsLoading || reviewsLoading) {
     return <LoadingState />
   }
 
   // Show error state
   if (error) {
     return <ErrorState error={error} />
+  }
+
+  // Calculate dashboard stats from real data
+  const dashboardStats = {
+    totalRepos: stats?.totalReviews || 0,
+    totalIssues: stats?.totalIssuesFound || 0,
+    criticalBugs: stats?.criticalIssues || 0,
+    resolvedIssues: stats?.majorIssues || 0, // Using major issues as resolved for now
   }
 
   return (
@@ -344,11 +441,14 @@ const DashboardPage = () => {
         {repositories.length === 0 ? (
           <div className="card text-center py-16">
             <GithubIcon size="xl" color="secondary" className="mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-slate-200 mb-2">No repositories found</h3>
-            <p className="text-slate-400 mb-6">Connect your GitHub account to start analyzing repositories</p>
-            <button className="btn btn-primary btn-md">
+            <h3 className="text-lg font-medium text-slate-200 mb-2">No repositories analyzed yet</h3>
+            <p className="text-slate-400 mb-6">Add your first repository to start analyzing code quality and tracking issues</p>
+            <button 
+              className="btn btn-primary btn-md"
+              onClick={() => setIsModalOpen(true)}
+            >
               <GithubIcon size="sm" />
-              Connect GitHub
+              Add Repository
             </button>
           </div>
         ) : (
@@ -377,13 +477,24 @@ const DashboardPage = () => {
               <TrendUpIcon size="sm" />
               <span className="text-sm font-medium">98% accuracy rate</span>
             </div>
-            <button className="btn btn-primary btn-lg glow-blue">
+            <button 
+              className="btn btn-primary btn-lg glow-blue"
+              onClick={() => setIsModalOpen(true)}
+            >
               <GithubIcon size="sm" />
               <span>Add Repository</span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* Add Repository Modal */}
+      <AddRepositoryModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSubmit={handleAddRepository}
+        isLoading={isAnalyzing}
+      />
     </div>
   )
 }

@@ -16,3 +16,4 @@ export {
   showNotification, 
   notifications 
 } from './NotificationContainer';
+export { default as AddRepositoryModal, type AddRepositoryModalProps } from './AddRepositoryModal';

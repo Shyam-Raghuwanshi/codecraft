@@ -1,373 +1,49 @@
 /**
  * Single Repository Analysis Page
- * CodeCraft - Hackathon Project
+ * CodeCraft - Dynamic Functionality
  * 
- * Shows detailed analysis for a single repo with:
- * - CodeRabbit AI reviews (left column)
- * - Sentry errors (right column)
- * - Interactive features and real-time updates
- * - Loading, error, and empty states
+ * Shows detailed analysis for a single repo using real Convex data
  */
 
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState, useEffect } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { 
   ArrowLeftIcon, 
   ExclamationTriangleIcon,
   BugAntIcon,
-  CpuChipIcon,
   ShieldExclamationIcon,
-  WrenchScrewdriverIcon,
   EyeIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  ClockIcon,
-  UsersIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  InformationCircleIcon
 } from '@heroicons/react/24/outline'
-import { LoadingSpinner, ErrorBoundary } from '../components'
-import { 
-  getMockRepoByName, 
-  getMockCodeRabbitReviews, 
-  getMockSentryErrors,
-  simulateApiDelay,
-  type CodeRabbitReview,
-  type SentryError,
-  type MockRepository
-} from '../lib/mock-data'
+import { useQuery } from 'convex/react'
+import { api } from '../../convex/_generated/api'
 
 // Search params type
 type RepoSearchParams = {
   name: string
 }
 
-// Component for severity badges with proper color coding
-const SeverityBadge: React.FC<{ severity: string; type?: 'review' | 'error' }> = ({ 
-  severity, 
-  type = 'review' 
-}) => {
-  const getStyles = () => {
-    if (type === 'error') {
-      switch (severity) {
-        case 'fatal': return 'badge-high'
-        case 'error': return 'badge-high' 
-        case 'warning': return 'badge-medium'
-        case 'info': return 'badge-info'
-        default: return 'badge badge-sm'
-      }
-    } else {
-      switch (severity) {
-        case 'high': return 'badge-high'
-        case 'medium': return 'badge-medium'
-        case 'low': return 'badge-low'
-        default: return 'badge badge-sm'
-      }
-    }
-  }
-
-  return (
-    <span className={`badge-sm ${getStyles()}`}>
-      {severity}
-    </span>
-  )
-}
-
-// Component for issue type badges
-const IssueTypeBadge: React.FC<{ type: string }> = ({ type }) => {
-  const getIcon = () => {
-    switch (type) {
-      case 'bug': return <BugAntIcon className="w-3 h-3 mr-1" />
-      case 'security': return <ShieldExclamationIcon className="w-3 h-3 mr-1" />
-      case 'performance': return <CpuChipIcon className="w-3 h-3 mr-1" />
-      case 'style': return <EyeIcon className="w-3 h-3 mr-1" />
-      case 'maintainability': return <WrenchScrewdriverIcon className="w-3 h-3 mr-1" />
-      default: return <InformationCircleIcon className="w-3 h-3 mr-1" />
-    }
-  }
-
-  const getStyles = () => {
-    switch (type) {
-      case 'bug': return 'badge-high'
-      case 'security': return 'badge-info'
-      case 'performance': return 'badge-medium'
-      case 'style': return 'badge-info'
-      case 'maintainability': return 'badge-low'
-      default: return 'badge'
-    }
-  }
-
-  return (
-    <span className={`badge-sm ${getStyles()}`}>
-      {getIcon()}
-      {type}
-    </span>
-  )
-}
-
-// CodeRabbit Review Card Component
-const CodeRabbitCard: React.FC<{ 
-  review: CodeRabbitReview; 
-  onSaveReview: (review: CodeRabbitReview) => void;
-  onToggleExpanded: (reviewId: string) => void;
-  isExpanded: boolean;
-}> = ({ review, onSaveReview, onToggleExpanded, isExpanded }) => {
-  const [isSaving, setIsSaving] = useState(false)
-  const [isSaved, setIsSaved] = useState(false)
-
-  const handleSave = async () => {
-    try {
-      setIsSaving(true)
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 800))
-      onSaveReview(review)
-      setIsSaved(true)
-      setTimeout(() => setIsSaved(false), 3000) // Reset after 3 seconds
-    } catch (error) {
-      console.error('Error saving review:', error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <div className="card p-4 hover-lift group animate-fade-in">
-      {/* Card Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <h4 className="text-sm font-medium text-slate-100 mb-1">{review.fileName}</h4>
-          <p className="text-xs text-slate-400">Line {review.line}</p>
-        </div>
-        <div className="flex items-center space-x-2 ml-4">
-          <IssueTypeBadge type={review.issueType} />
-          <SeverityBadge severity={review.severity} />
-        </div>
-      </div>
-
-      {/* Issue Message */}
-      <p className="text-sm text-slate-300 mb-3">{review.message}</p>
-
-      {/* Expandable Content */}
-      <div className="space-y-3">
-        <button
-          onClick={() => onToggleExpanded(review.reviewId)}
-          className="flex items-center text-xs text-blue-400 hover:text-blue-300 font-medium"
-        >
-          {isExpanded ? (
-            <>
-              <ChevronUpIcon className="w-4 h-4 mr-1" />
-              Hide Details
-            </>
-          ) : (
-            <>
-              <ChevronDownIcon className="w-4 h-4 mr-1" />
-              Show AI Suggestion & Code
-            </>
-          )}
-        </button>
-
-        {isExpanded && (
-          <div className="space-y-4">
-            {/* AI Suggestion */}
-            <div className="card p-3 border border-blue-500/30">
-              <h5 className="text-xs font-medium text-blue-300 mb-2">💡 AI Suggestion</h5>
-              <p className="text-xs text-slate-300">{review.suggestion}</p>
-            </div>
-
-            {/* Code Snippet */}
-            <div className="code-block">
-              <h5 className="text-xs font-medium text-slate-300 mb-2">📝 Code Snippet</h5>
-              <pre className="text-xs text-slate-200 overflow-x-auto">
-                <code>{review.codeSnippet}</code>
-              </pre>
-            </div>
-          </div>
-        )}
-
-        {/* Card Footer */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-700">
-          <div className="flex items-center text-xs text-slate-400">
-            <ClockIcon className="w-3 h-3 mr-1" />
-            {new Date(review.createdAt).toLocaleDateString()}
-          </div>
-          
-          <button
-            onClick={handleSave}
-            disabled={isSaving || isSaved}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              isSaved 
-                ? 'badge-low'
-                : isSaving
-                  ? 'badge badge-sm'
-                  : 'badge-info hover:opacity-80'
-            }`}
-          >
-            {isSaving ? (
-              'Saving...'
-            ) : isSaved ? (
-              <>
-                <CheckCircleIcon className="w-3 h-3 inline mr-1" />
-                Saved
-              </>
-            ) : (
-              'Save Review'
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Sentry Error Card Component
-const SentryErrorCard: React.FC<{ 
-  error: SentryError;
-  onToggleExpanded: (errorId: string) => void;
-  isExpanded: boolean;
-}> = ({ error, onToggleExpanded, isExpanded }) => {
-  const isRecent = () => {
-    const errorTime = new Date(error.occurredAt).getTime()
-    const now = Date.now()
-    const hoursDiff = (now - errorTime) / (1000 * 60 * 60)
-    return hoursDiff <= 2 // Within last 2 hours
-  }
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
-    
-    if (diffHours < 1) {
-      const diffMinutes = Math.round(diffHours * 60)
-      return `${diffMinutes}m ago`
-    } else if (diffHours < 24) {
-      return `${Math.round(diffHours)}h ago`
-    } else {
-      const diffDays = Math.round(diffHours / 24)
-      return `${diffDays}d ago`
-    }
-  }
-
-  return (
-    <div className="card p-4 hover-lift group animate-fade-in">
-      {/* Card Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <div className="flex items-center mb-2">
-            {isRecent() && (
-              <div className="status-success mr-2" 
-                   title="Recent activity" />
-            )}
-            <h4 className="text-sm font-medium text-slate-100 truncate">
-              {error.errorMessage}
-            </h4>
-          </div>
-          <p className="text-xs text-slate-400">{error.errorType}</p>
-        </div>
-        <SeverityBadge severity={error.severity} type="error" />
-      </div>
-
-      {/* Error Metrics */}
-      <div className="grid grid-cols-3 gap-4 mb-3">
-        <div className="text-center">
-          <div className="flex items-center justify-center mb-1">
-            <UsersIcon className="w-4 h-4 text-slate-400 mr-1" />
-          </div>
-          <p className="text-xs font-medium text-slate-100">{error.affectedUsers}</p>
-          <p className="text-xs text-slate-400">Users</p>
-        </div>
-        <div className="text-center">
-          <div className="flex items-center justify-center mb-1">
-            <ExclamationTriangleIcon className="w-4 h-4 text-slate-400 mr-1" />
-          </div>
-          <p className="text-xs font-medium text-slate-100">{error.totalOccurrences}</p>
-          <p className="text-xs text-slate-400">Events</p>
-        </div>
-        <div className="text-center">
-          <div className="flex items-center justify-center mb-1">
-            <ClockIcon className="w-4 h-4 text-slate-400 mr-1" />
-          </div>
-          <p className="text-xs font-medium text-slate-100">{formatTime(error.occurredAt)}</p>
-          <p className="text-xs text-slate-400">Last seen</p>
-        </div>
-      </div>
-
-      {/* Environment Info */}
-      <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
-        <span className="badge badge-sm">{error.environment}</span>
-        {error.browser && <span>{error.browser}</span>}
-        {error.os && <span>{error.os}</span>}
-      </div>
-
-      {/* Expandable Stack Trace */}
-      <button
-        onClick={() => onToggleExpanded(error.errorId)}
-        className="flex items-center text-xs text-blue-400 hover:text-blue-300 font-medium w-full"
-      >
-        {isExpanded ? (
-          <>
-            <ChevronUpIcon className="w-4 h-4 mr-1" />
-            Hide Stack Trace
-          </>
-        ) : (
-          <>
-            <ChevronDownIcon className="w-4 h-4 mr-1" />
-            Show Stack Trace
-          </>
-        )}
-      </button>
-
-      {isExpanded && (
-        <div className="mt-3 code-block">
-          <h5 className="text-xs font-medium text-slate-300 mb-2">🐛 Stack Trace</h5>
-          <pre className="text-xs text-slate-200 overflow-x-auto whitespace-pre-wrap">
-            {error.stackTrace}
-          </pre>
-          {error.url && (
-            <div className="mt-2 pt-2 border-t border-slate-700">
-              <p className="text-xs text-slate-400">
-                <strong>URL:</strong> {error.url}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Main Repository Component
+// Repository page component
 function RepositoryPage() {
   const { name: repoName } = Route.useSearch()
   const navigate = useNavigate()
-  const { isSignedIn } = useAuth()
+  const { isSignedIn, userId } = useAuth()
   
-  // State management
-  const [repository, setRepository] = useState<MockRepository | null>(null)
-  const [codeRabbitReviews, setCodeRabbitReviews] = useState<CodeRabbitReview[]>([])
-  const [sentryErrors, setSentryErrors] = useState<SentryError[]>([])
-  const [expandedReviews, setExpandedReviews] = useState<Set<string>>(new Set())
-  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
+  // Get user reviews from Convex
+  const allReviews = useQuery(
+    api.functions.getUserReviews,
+    userId ? { clerkId: userId } : 'skip'
+  )
   
-  // Loading states
-  const [loading, setLoading] = useState({
-    initial: true,
-    reviews: false,
-    errors: false,
-    generating: false
-  })
-  
-  // Error states
-  const [errors, setErrors] = useState({
-    repository: null as string | null,
-    reviews: null as string | null,
-    errors: null as string | null,
-    generating: null as string | null
-  })
+  // State for current repository
+  const [currentReview, setCurrentReview] = useState<any | null>(null)
+  const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Check authentication and repo name
+  // Check authentication
   useEffect(() => {
     if (!isSignedIn) {
       navigate({ to: '/signin' })
@@ -380,507 +56,273 @@ function RepositoryPage() {
     }
   }, [isSignedIn, repoName, navigate])
 
-  // Load repository data with error handling
-  const loadRepositoryData = async () => {
-    try {
-      setLoading(prev => ({ ...prev, initial: true }))
-      setErrors({ repository: null, reviews: null, errors: null, generating: null })
-      
-      // Simulate API loading delay
-      await simulateApiDelay(1000)
-      
-      if (!repoName) {
-        throw new Error('Repository name is required')
-      }
-      
-      // Fetch repository data
-      const repo = getMockRepoByName(repoName)
-      if (!repo) {
-        throw new Error(`Repository '${repoName}' not found`)
-      }
-      
-      setRepository(repo)
-      
-      // Load reviews and errors in parallel
-      await Promise.all([
-        loadReviews(repoName),
-        loadErrors(repoName)
-      ])
-      
-    } catch (error) {
-      console.error('Error loading repository data:', error)
-      setErrors(prev => ({ 
-        ...prev, 
-        repository: error instanceof Error ? error.message : 'Failed to load repository data'
-      }))
-    } finally {
-      setLoading(prev => ({ ...prev, initial: false }))
-    }
-  }
-
-  // Load CodeRabbit reviews with error handling
-  const loadReviews = async (name: string) => {
-    try {
-      setLoading(prev => ({ ...prev, reviews: true }))
-      setErrors(prev => ({ ...prev, reviews: null }))
-      
-      await simulateApiDelay(800)
-      const reviews = getMockCodeRabbitReviews(name)
-      setCodeRabbitReviews(reviews)
-      
-    } catch (error) {
-      console.error('Error loading reviews:', error)
-      setErrors(prev => ({ 
-        ...prev, 
-        reviews: 'Failed to load CodeRabbit reviews. Please check your connection and try again.'
-      }))
-    } finally {
-      setLoading(prev => ({ ...prev, reviews: false }))
-    }
-  }
-
-  // Load Sentry errors with error handling
-  const loadErrors = async (name: string) => {
-    try {
-      setLoading(prev => ({ ...prev, errors: true }))
-      setErrors(prev => ({ ...prev, errors: null }))
-      
-      await simulateApiDelay(600)
-      const sentryData = getMockSentryErrors(name)
-      setSentryErrors(sentryData)
-      
-    } catch (error) {
-      console.error('Error loading Sentry errors:', error)
-      setErrors(prev => ({ 
-        ...prev, 
-        errors: 'Failed to load Sentry errors. Please check your connection and try again.'
-      }))
-    } finally {
-      setLoading(prev => ({ ...prev, errors: false }))
-    }
-  }
-
-  // Retry functions
-  const retryRepositoryData = () => {
-    if (repoName) {
-      loadRepositoryData()
-    }
-  }
-
-  const retryReviews = () => {
-    if (repoName) {
-      loadReviews(repoName)
-    }
-  }
-
-  const retryErrors = () => {
-    if (repoName) {
-      loadErrors(repoName)
-    }
-  }
-
-  // Load repository data on mount
+  // Find the current repository review
   useEffect(() => {
-    if (isSignedIn && repoName) {
-      loadRepositoryData()
+    if (allReviews && repoName) {
+      try {
+        const matchingReview = allReviews.find(review => 
+          review.repoName.toLowerCase().includes(repoName.toLowerCase())
+        )
+        
+        if (matchingReview) {
+          setCurrentReview(matchingReview)
+          setError(null)
+        } else {
+          setError(`Repository "${repoName}" not found in your analyzed repositories.`)
+        }
+        setIsLoading(false)
+      } catch (err) {
+        console.error('Error finding repository:', err)
+        setError('Failed to load repository data.')
+        setIsLoading(false)
+      }
+    } else if (allReviews) {
+      setError(`Repository "${repoName}" not found.`)
+      setIsLoading(false)
     }
-  }, [repoName, isSignedIn])
+  }, [allReviews, repoName])
 
-  // Toggle expanded state for reviews
-  const toggleReviewExpanded = (reviewId: string) => {
-    setExpandedReviews(prev => {
+  // Toggle expanded state for issues
+  const toggleIssueExpanded = (issueId: string) => {
+    setExpandedIssues(prev => {
       const newSet = new Set(prev)
-      if (newSet.has(reviewId)) {
-        newSet.delete(reviewId)
+      if (newSet.has(issueId)) {
+        newSet.delete(issueId)
       } else {
-        newSet.add(reviewId)
+        newSet.add(issueId)
       }
       return newSet
     })
   }
 
-  // Toggle expanded state for errors
-  const toggleErrorExpanded = (errorId: string) => {
-    setExpandedErrors(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(errorId)) {
-        newSet.delete(errorId)
-      } else {
-        newSet.add(errorId)
-      }
-      return newSet
-    })
-  }
-
-  // Save review to Convex with error handling
-  const handleSaveReview = async (review: CodeRabbitReview) => {
-    try {
-      console.log('Saving review to database:', review.reviewId)
-      await simulateApiDelay(500)
-    } catch (error) {
-      console.error('Error saving review:', error)
-      throw error
+  // Helper function to get severity color
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'text-red-400 bg-red-900/20 border-red-700'
+      case 'major': return 'text-orange-400 bg-orange-900/20 border-orange-700'
+      case 'minor': return 'text-yellow-400 bg-yellow-900/20 border-yellow-700'
+      default: return 'text-slate-400 bg-slate-900/20 border-slate-700'
     }
   }
 
-  // Generate new review with error handling
-  const handleGenerateNewReview = async () => {
-    try {
-      setLoading(prev => ({ ...prev, generating: true }))
-      setErrors(prev => ({ ...prev, generating: null }))
-      
-      // Simulate AI analysis delay
-      await simulateApiDelay(2000)
-      
-      // Create a new mock review
-      const newReview: CodeRabbitReview = {
-        reviewId: `cr-new-${Date.now()}`,
-        repoName: repository?.name || '',
-        fileName: 'src/components/NewFeature.tsx',
-        issueType: 'performance',
-        severity: 'medium',
-        line: Math.floor(Math.random() * 100) + 1,
-        message: 'Newly generated review: Component could benefit from memoization',
-        suggestion: 'Consider using React.memo() to prevent unnecessary re-renders when props haven\'t changed',
-        codeSnippet: `const NewFeature = ({ data, onUpdate }) => {
-  // ⚠️ Re-renders on every parent update
-  const processedData = data.map(item => ({ ...item, processed: true }));
-  return <div>{/* component content */}</div>;
-};`,
-        createdAt: new Date().toISOString(),
-        status: 'open'
-      }
-      
-      setCodeRabbitReviews(prev => [newReview, ...prev])
-      
-    } catch (error) {
-      console.error('Error generating new review:', error)
-      setErrors(prev => ({ 
-        ...prev, 
-        generating: 'Failed to generate new review. Please try again.'
-      }))
-    } finally {
-      setLoading(prev => ({ ...prev, generating: false }))
-    }
-  }
-
-  // Calculate summary stats
-  const summaryStats = () => {
-    const totalIssues = codeRabbitReviews.length + sentryErrors.filter(e => e.severity === 'error' || e.severity === 'fatal').length
-    const criticalCount = codeRabbitReviews.filter(r => r.severity === 'high').length + 
-                         sentryErrors.filter(e => e.severity === 'fatal').length
-    const fixedCount = codeRabbitReviews.filter(r => r.status === 'resolved').length
-    
-    return { totalIssues, criticalCount, fixedCount }
-  }
-
-  // Handle empty repository name
-  if (!repoName) {
+  // Loading state
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-slate-100 mb-2">Repository Not Specified</h2>
-          <p className="text-slate-400 mb-4">Please provide a repository name to view analysis.</p>
-          <Link to="/">
-            <button className="btn btn-primary btn-md">
-              Back to Dashboard
-            </button>
-          </Link>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading repository data...</p>
         </div>
       </div>
     )
   }
 
-  if (!isSignedIn) {
+  // Error state
+  if (error) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-slate-100 mb-2">Authentication Required</h2>
-          <p className="text-slate-400 mb-4">Please sign in to view repository analysis.</p>
-          <Link to="/signin">
-            <button className="btn btn-primary btn-md">
-              Sign In
-            </button>
-          </Link>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <ExclamationTriangleIcon className="h-12 w-12 text-red-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-slate-200 mb-2">Repository Not Found</h2>
+          <p className="text-slate-400 mb-6">{error}</p>
+          <button 
+            onClick={() => navigate({ to: '/' })}
+            className="btn btn-primary btn-md"
+          >
+            <ArrowLeftIcon className="w-4 h-4" />
+            Back to Dashboard
+          </button>
         </div>
       </div>
     )
   }
 
-  if (loading.initial) {
+  // No review data
+  if (!currentReview) {
     return (
-      <ErrorBoundary>
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-          <div className="text-center">
-            <LoadingSpinner size="lg" message="Loading repository analysis..." />
-          </div>
-        </div>
-      </ErrorBoundary>
-    )
-  }
-
-  if (errors.repository) {
-    return (
-      <ErrorBoundary>
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <div className="flex items-center justify-center w-16 h-16 mx-auto bg-red-900/50 rounded-full mb-4">
-              <XCircleIcon className="w-8 h-8 text-red-400" />
-            </div>
-            <h2 className="text-2xl font-bold text-slate-100 mb-2">Repository Error</h2>
-            <p className="text-slate-400 mb-4">{errors.repository}</p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <button
-                onClick={retryRepositoryData}
-                className="btn btn-primary btn-md"
-              >
-                Try Again
-              </button>
-              <Link to="/">
-                <button className="btn btn-secondary btn-md">
-                  Back to Dashboard
-                </button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </ErrorBoundary>
-    )
-  }
-
-  if (!repository) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <XCircleIcon className="w-16 h-16 text-red-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-slate-100 mb-2">Repository Not Found</h2>
-          <p className="text-slate-400 mb-4">The requested repository "{repoName}" could not be found.</p>
-          <Link to="/">
-            <button className="btn btn-primary btn-md">
-              Back to Dashboard
-            </button>
-          </Link>
+          <p className="text-slate-400">No review data available.</p>
         </div>
       </div>
     )
   }
 
-  const stats = summaryStats()
+  const { reviewData } = currentReview
+  const issues = reviewData.issues || []
+  const sentryErrors = reviewData.sentryErrors || []
+  const summary = reviewData.summary || {}
 
   return (
-    <ErrorBoundary>
-      <div className="min-h-screen bg-slate-900">
-        <div className="w-screen py-6">
-        {/* Repository Header */}
-        <div className="card p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link to="/">
-                <button className="flex items-center text-slate-400 hover:text-slate-200 transition-colors">
-                  <ArrowLeftIcon className="w-5 h-5 mr-2" />
-                  Back to Dashboard
-                </button>
-              </Link>
-              
-              <div className="border-l border-slate-600 pl-4">
-                <h1 className="text-2xl font-bold text-slate-100">
-                  {repository.owner}/{repository.name}
-                </h1>
-                <div className="flex items-center space-x-4 mt-2">
-                  <span className="badge badge-sm badge-info">
-                    {repository.language}
-                  </span>
-                  <span className="text-sm text-slate-400">
-                    ⭐ {repository.stars.toLocaleString()} stars
-                  </span>
-                  <span className="text-sm text-slate-400">
-                    Updated {new Date(repository.lastUpdated).toLocaleDateString()}
-                  </span>
-                </div>
+    <div className="min-h-screen bg-slate-900 text-slate-100">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center space-x-4">
+            <button 
+              onClick={() => navigate({ to: '/' })}
+              className="btn btn-secondary btn-sm"
+            >
+              <ArrowLeftIcon className="w-4 h-4" />
+              Back
+            </button>
+            <div>
+              <h1 className="text-2xl font-bold">{currentReview.repoName}</h1>
+              <p className="text-slate-400">
+                Analyzed on {new Date(currentReview.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-400">Total Issues</p>
+                <p className="text-2xl font-bold text-slate-100">{summary.totalIssues || 0}</p>
               </div>
+              <BugAntIcon className="w-8 h-8 text-orange-400" />
             </div>
           </div>
           
-          {repository.description && (
-            <p className="mt-4 text-slate-300">{repository.description}</p>
-          )}
-        </div>
-
-        {/* Two Column Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {/* LEFT COLUMN - CodeRabbit Reviews */}
-          <div className="space-y-4">
+          <div className="card p-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-100 flex items-center">
-                🤖 CodeRabbit AI Reviews
-                <span className="ml-2 badge-info badge-sm">
-                  {codeRabbitReviews.length}
-                </span>
-              </h2>
-              <button
-                onClick={handleGenerateNewReview}
-                disabled={loading.generating}
-                className={`btn ${
-                  loading.generating
-                    ? 'btn-ghost opacity-50 cursor-not-allowed'
-                    : 'btn-primary'
-                } btn-md`}
-              >
-                {loading.generating ? (
-                  <>
-                    <LoadingSpinner size="sm" className="inline-block mr-2" />
-                    Generating...
-                  </>
-                ) : (
-                  'Generate New Review'
-                )}
-              </button>
+              <div>
+                <p className="text-sm text-slate-400">Critical Issues</p>
+                <p className="text-2xl font-bold text-red-400">{summary.criticalIssues || 0}</p>
+              </div>
+              <ExclamationTriangleIcon className="w-8 h-8 text-red-400" />
             </div>
-            
-            {loading.reviews ? (
-              <div className="card p-6">
-                <LoadingSpinner message="Loading CodeRabbit reviews..." />
-              </div>
-            ) : errors.reviews ? (
-              <div className="card p-6">
-                <div className="text-center">
-                  <div className="flex items-center justify-center w-12 h-12 mx-auto bg-red-900/50 rounded-full mb-4">
-                    <ExclamationTriangleIcon className="w-6 h-6 text-red-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-slate-100 mb-2">
-                    Unable to Load Reviews
-                  </h3>
-                  <p className="text-slate-400 mb-4">{errors.reviews}</p>
-                  <button
-                    onClick={retryReviews}
-                    className="btn btn-primary btn-md"
-                  >
-                    Retry
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {codeRabbitReviews.length === 0 ? (
-                  <div className="text-center py-8 card">
-                    <CheckCircleIcon className="w-12 h-12 text-green-400 mx-auto mb-3" />
-                    <p className="text-slate-300">No code reviews found</p>
-                    <p className="text-sm text-slate-400">This repository is in excellent shape!</p>
-                  </div>
-                ) : (
-                  codeRabbitReviews.map(review => (
-                    <CodeRabbitCard
-                      key={review.reviewId}
-                      review={review}
-                      onSaveReview={handleSaveReview}
-                      onToggleExpanded={toggleReviewExpanded}
-                      isExpanded={expandedReviews.has(review.reviewId)}
-                    />
-                  ))
-                )}
-              </div>
-            )}
-
-            {errors.generating && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-4">
-                <div className="flex items-center">
-                  <ExclamationTriangleIcon className="w-5 h-5 text-red-600 mr-2" />
-                  <p className="text-sm text-red-700">{errors.generating}</p>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* RIGHT COLUMN - Sentry Errors */}
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold text-slate-100 flex items-center">
-              🚨 Sentry Errors
-              <span className="ml-2 badge-high badge-sm">
-                {sentryErrors.length}
-              </span>
+          <div className="card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-400">Major Issues</p>
+                <p className="text-2xl font-bold text-orange-400">{summary.majorIssues || 0}</p>
+              </div>
+              <ShieldExclamationIcon className="w-8 h-8 text-orange-400" />
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-400">Code Quality</p>
+                <p className="text-2xl font-bold text-blue-400">{summary.codeQualityScore || 'N/A'}</p>
+              </div>
+              <EyeIcon className="w-8 h-8 text-blue-400" />
+            </div>
+          </div>
+        </div>
+
+        {/* Issues Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* CodeRabbit Issues */}
+          <div className="card p-6">
+            <h2 className="text-xl font-semibold mb-6 flex items-center">
+              <BugAntIcon className="w-6 h-6 mr-2" />
+              Code Issues ({issues.length})
             </h2>
             
-            {loading.errors ? (
-              <div className="card p-6">
-                <LoadingSpinner message="Loading Sentry errors..." />
-              </div>
-            ) : errors.errors ? (
-              <div className="card p-6">
-                <div className="text-center">
-                  <div className="flex items-center justify-center w-12 h-12 mx-auto bg-red-900/50 rounded-full mb-4">
-                    <ExclamationTriangleIcon className="w-6 h-6 text-red-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-slate-100 mb-2">
-                    Unable to Load Errors
-                  </h3>
-                  <p className="text-slate-400 mb-4">{errors.errors}</p>
-                  <button
-                    onClick={retryErrors}
-                    className="btn btn-primary btn-md"
-                  >
-                    Retry
-                  </button>
-                </div>
+            {issues.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-400">No code issues found!</p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {sentryErrors.length === 0 ? (
-                  <div className="text-center py-8 card">
-                    <CheckCircleIcon className="w-12 h-12 text-green-400 mx-auto mb-3" />
-                    <p className="text-slate-300">No errors detected</p>
-                    <p className="text-sm text-slate-400">Your application is running smoothly!</p>
+              <div className="space-y-4">
+                {issues.map((issue: any) => (
+                  <div key={issue.id} className="border border-slate-700 rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-slate-100">{issue.title}</h3>
+                        <p className="text-sm text-slate-400">{issue.file}:{issue.line}</p>
+                      </div>
+                      <span className={`px-2 py-1 text-xs rounded border ${getSeverityColor(issue.severity)}`}>
+                        {issue.severity}
+                      </span>
+                    </div>
+                    
+                    <p className="text-slate-300 text-sm mb-3">{issue.description}</p>
+                    
+                    <button
+                      onClick={() => toggleIssueExpanded(issue.id)}
+                      className="flex items-center text-sm text-blue-400 hover:text-blue-300"
+                    >
+                      {expandedIssues.has(issue.id) ? (
+                        <><ChevronUpIcon className="w-4 h-4 mr-1" /> Hide details</>
+                      ) : (
+                        <><ChevronDownIcon className="w-4 h-4 mr-1" /> Show details</>
+                      )}
+                    </button>
+                    
+                    {expandedIssues.has(issue.id) && issue.suggestion && (
+                      <div className="mt-3 p-3 bg-slate-800 rounded border border-slate-600">
+                        <p className="text-sm text-green-400 font-medium mb-1">Suggestion:</p>
+                        <p className="text-sm text-slate-300">{issue.suggestion}</p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  sentryErrors.map(error => (
-                    <SentryErrorCard
-                      key={error.errorId}
-                      error={error}
-                      onToggleExpanded={toggleErrorExpanded}
-                      isExpanded={expandedErrors.has(error.errorId)}
-                    />
-                  ))
-                )}
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Sentry Errors */}
+          <div className="card p-6">
+            <h2 className="text-xl font-semibold mb-6 flex items-center">
+              <ExclamationTriangleIcon className="w-6 h-6 mr-2" />
+              Runtime Errors ({sentryErrors.length})
+            </h2>
+            
+            {sentryErrors.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-400">No runtime errors detected!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {sentryErrors.map((error: any) => (
+                  <div key={error.id} className="border border-slate-700 rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-slate-100">{error.title}</h3>
+                        <p className="text-sm text-slate-400">
+                          {error.count} occurrences
+                        </p>
+                      </div>
+                      <span className={`px-2 py-1 text-xs rounded border ${getSeverityColor(error.level)}`}>
+                        {error.level}
+                      </span>
+                    </div>
+                    
+                    <p className="text-slate-400 text-xs">
+                      Last seen: {new Date(error.lastSeen).toLocaleString()}
+                    </p>
+                    
+                    {error.url && (
+                      <p className="text-slate-400 text-xs mt-1">
+                        URL: {error.url}
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
         </div>
-
-        {/* Bottom Summary */}
-        <div className="card p-6">
-          <h3 className="text-lg font-semibold text-slate-100 mb-4">📊 Summary Statistics</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-blue-400 mb-1">{stats.totalIssues}</div>
-              <div className="text-sm text-slate-400">Total Issues Found</div>
-            </div>
-            
-            <div className="text-center">
-              <div className="text-3xl font-bold text-red-400 mb-1">{stats.criticalCount}</div>
-              <div className="text-sm text-slate-400">Critical Issues</div>
-            </div>
-            
-            <div className="text-center">
-              <div className="text-3xl font-bold text-green-400 mb-1">{stats.fixedCount}</div>
-              <div className="text-sm text-slate-400">Issues Resolved</div>
-            </div>
-          </div>
-          
-          <div className="mt-6 pt-4 border-t border-slate-700 text-center">
-            <p className="text-sm text-slate-400">
-              Last analysis completed on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
-            </p>
-          </div>
-        </div>
-        </div>
       </div>
-    </ErrorBoundary>
+    </div>
   )
 }
 
+// Route configuration
 export const Route = createFileRoute('/repo')({
-  validateSearch: (search: Record<string, unknown>): RepoSearchParams => ({
-    name: (search.name as string) || '',
-  }),
   component: RepositoryPage,
+  validateSearch: (search: Record<string, unknown>): RepoSearchParams => {
+    return {
+      name: typeof search.name === 'string' ? search.name : ''
+    }
+  }
 })
