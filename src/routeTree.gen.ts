@@ -10,8 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SigninRouteImport } from './routes/signin'
+import { Route as RepoRealtimeRouteImport } from './routes/repo-realtime'
+import { Route as RepoOldRouteImport } from './routes/repo-old'
 import { Route as RepoRouteImport } from './routes/repo'
-import { Route as LandingRouteImport } from './routes/landing'
+import { Route as GithubInstallationCallbackRouteImport } from './routes/github-installation-callback'
+import { Route as GithubCallbackRouteImport } from './routes/github-callback'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SigninRoute = SigninRouteImport.update({
@@ -19,14 +23,35 @@ const SigninRoute = SigninRouteImport.update({
   path: '/signin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RepoRealtimeRoute = RepoRealtimeRouteImport.update({
+  id: '/repo-realtime',
+  path: '/repo-realtime',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RepoOldRoute = RepoOldRouteImport.update({
+  id: '/repo-old',
+  path: '/repo-old',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RepoRoute = RepoRouteImport.update({
   id: '/repo',
   path: '/repo',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LandingRoute = LandingRouteImport.update({
-  id: '/landing',
-  path: '/landing',
+const GithubInstallationCallbackRoute =
+  GithubInstallationCallbackRouteImport.update({
+    id: '/github-installation-callback',
+    path: '/github-installation-callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GithubCallbackRoute = GithubCallbackRouteImport.update({
+  id: '/github-callback',
+  path: '/github-callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -37,35 +62,76 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
+  '/dashboard': typeof DashboardRoute
+  '/github-callback': typeof GithubCallbackRoute
+  '/github-installation-callback': typeof GithubInstallationCallbackRoute
   '/repo': typeof RepoRoute
+  '/repo-old': typeof RepoOldRoute
+  '/repo-realtime': typeof RepoRealtimeRoute
   '/signin': typeof SigninRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
+  '/dashboard': typeof DashboardRoute
+  '/github-callback': typeof GithubCallbackRoute
+  '/github-installation-callback': typeof GithubInstallationCallbackRoute
   '/repo': typeof RepoRoute
+  '/repo-old': typeof RepoOldRoute
+  '/repo-realtime': typeof RepoRealtimeRoute
   '/signin': typeof SigninRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
+  '/dashboard': typeof DashboardRoute
+  '/github-callback': typeof GithubCallbackRoute
+  '/github-installation-callback': typeof GithubInstallationCallbackRoute
   '/repo': typeof RepoRoute
+  '/repo-old': typeof RepoOldRoute
+  '/repo-realtime': typeof RepoRealtimeRoute
   '/signin': typeof SigninRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/landing' | '/repo' | '/signin'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/github-callback'
+    | '/github-installation-callback'
+    | '/repo'
+    | '/repo-old'
+    | '/repo-realtime'
+    | '/signin'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/landing' | '/repo' | '/signin'
-  id: '__root__' | '/' | '/landing' | '/repo' | '/signin'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/github-callback'
+    | '/github-installation-callback'
+    | '/repo'
+    | '/repo-old'
+    | '/repo-realtime'
+    | '/signin'
+  id:
+    | '__root__'
+    | '/'
+    | '/dashboard'
+    | '/github-callback'
+    | '/github-installation-callback'
+    | '/repo'
+    | '/repo-old'
+    | '/repo-realtime'
+    | '/signin'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  LandingRoute: typeof LandingRoute
+  DashboardRoute: typeof DashboardRoute
+  GithubCallbackRoute: typeof GithubCallbackRoute
+  GithubInstallationCallbackRoute: typeof GithubInstallationCallbackRoute
   RepoRoute: typeof RepoRoute
+  RepoOldRoute: typeof RepoOldRoute
+  RepoRealtimeRoute: typeof RepoRealtimeRoute
   SigninRoute: typeof SigninRoute
 }
 
@@ -78,6 +144,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SigninRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/repo-realtime': {
+      id: '/repo-realtime'
+      path: '/repo-realtime'
+      fullPath: '/repo-realtime'
+      preLoaderRoute: typeof RepoRealtimeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/repo-old': {
+      id: '/repo-old'
+      path: '/repo-old'
+      fullPath: '/repo-old'
+      preLoaderRoute: typeof RepoOldRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/repo': {
       id: '/repo'
       path: '/repo'
@@ -85,11 +165,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RepoRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/landing': {
-      id: '/landing'
-      path: '/landing'
-      fullPath: '/landing'
-      preLoaderRoute: typeof LandingRouteImport
+    '/github-installation-callback': {
+      id: '/github-installation-callback'
+      path: '/github-installation-callback'
+      fullPath: '/github-installation-callback'
+      preLoaderRoute: typeof GithubInstallationCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/github-callback': {
+      id: '/github-callback'
+      path: '/github-callback'
+      fullPath: '/github-callback'
+      preLoaderRoute: typeof GithubCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -104,8 +198,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  LandingRoute: LandingRoute,
+  DashboardRoute: DashboardRoute,
+  GithubCallbackRoute: GithubCallbackRoute,
+  GithubInstallationCallbackRoute: GithubInstallationCallbackRoute,
   RepoRoute: RepoRoute,
+  RepoOldRoute: RepoOldRoute,
+  RepoRealtimeRoute: RepoRealtimeRoute,
   SigninRoute: SigninRoute,
 }
 export const routeTree = rootRouteImport

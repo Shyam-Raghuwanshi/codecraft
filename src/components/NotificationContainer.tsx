@@ -6,7 +6,7 @@
  * Follow the rules: Include error handling, accessibility, responsive design
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   XMarkIcon, 
   ExclamationTriangleIcon,
@@ -159,7 +159,7 @@ export function NotificationContainer() {
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
 
   // Add notification function (will be exposed via context)
-  const addNotification = (notification: Omit<NotificationData, 'id'>) => {
+  const addNotification = useCallback((notification: Omit<NotificationData, 'id'>) => {
     const id = `notification-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const newNotification = {
       ...notification,
@@ -168,17 +168,17 @@ export function NotificationContainer() {
     
     setNotifications(prev => [newNotification, ...prev]);
     return id;
-  };
+  }, []);
 
   // Remove notification
-  const removeNotification = (id: string) => {
+  const removeNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
-  };
+  }, []);
 
   // Clear all notifications
-  const clearAll = () => {
+  const clearAll = useCallback(() => {
     setNotifications([]);
-  };
+  }, []);
 
   // Expose functions via window for global access (can be improved with context)
   useEffect(() => {

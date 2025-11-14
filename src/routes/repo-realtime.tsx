@@ -513,7 +513,7 @@ function RepositoryPage() {
   );
 }
 
-export const Route = createFileRoute('/repo')({
+export const Route = createFileRoute('/repo-realtime')({
   validateSearch: (search: Record<string, unknown>): RepoSearchParams => ({
     name: (search.name as string) || '',
   }),

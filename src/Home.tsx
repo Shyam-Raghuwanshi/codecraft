@@ -256,15 +256,15 @@ function Home() {
                 <button
                   onClick={() => {
                     notifications.info(
-                      'Add Repository', 
-                      'Feature coming soon! For now, you can simulate data by saving a review.'
+                      'Connect Repository', 
+                      'Use the main dashboard to connect your GitHub repositories for analysis.'
                     );
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 
                            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
                            transition-colors duration-200"
                 >
-                  Add Repository
+                  Connect Repository
                 </button>
               </div>
             )}
@@ -396,15 +396,15 @@ function Home() {
                 <button
                   onClick={() => {
                     notifications.info(
-                      'Getting Started', 
-                      'Run your first code analysis to see activity here'
+                      'Get Started', 
+                      'Navigate to the main dashboard to connect your GitHub repositories and start analyzing your code.'
                     );
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 
                            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
                            transition-colors duration-200"
                 >
-                  Analyze Repository
+                  Get Started
                 </button>
               </div>
             )}

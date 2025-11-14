@@ -9,7 +9,7 @@
 import { useQuery, useMutation } from 'convex/react';
 import { useAuth } from '@clerk/clerk-react';
 import { api } from '../../convex/_generated/api';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 /**
  * Hook to get real-time dashboard statistics
@@ -92,6 +92,7 @@ export function useRecentReviews(limit: number = 5) {
     error,
     retry: () => {
       setError(null);
+      // Convex automatically retries on network issues
     }
   };
 }
@@ -173,13 +174,19 @@ export function useUserReviews() {
     }
   }, [userId]);
 
+  const safeReviews = useMemo(() => {
+    if (!reviews) return [];
+    return reviews;
+  }, [reviews]);
+
   return {
-    reviews: reviews || [],
+    reviews: safeReviews,
     isLoading: isLoading && userId !== null,
     hasError,
     error,
     retry: () => {
       setError(null);
+      // Convex automatically retries on network issues
     }
   };
 }

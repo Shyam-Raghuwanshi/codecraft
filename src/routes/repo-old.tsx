@@ -887,7 +887,7 @@ function RepositoryPage() {
   )
 }
 
-export const Route = createFileRoute('/repo')({
+export const Route = createFileRoute('/repo-old')({
   validateSearch: (search: Record<string, unknown>): RepoSearchParams => ({
     name: (search.name as string) || '',
   }),

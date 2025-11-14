@@ -10,14 +10,15 @@ function AuthenticatedApp() {
   // Redirect unauthenticated users to signin page (except for public pages)
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
-      const currentPath = window.location.pathname
-      // Don't redirect if on public pages (signin or landing)
-      const publicPaths = ['/signin', '/landing']
+  const currentPath = window.location.pathname
+  // Don't redirect if on public pages (landing, signin, etc.)
+  const publicPaths = ['/', '/signin', '/landing']
       if (!publicPaths.includes(currentPath)) {
         navigate({ to: '/signin' })
       }
     }
-  }, [isLoaded, isSignedIn, navigate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isSignedIn])
   
   // Show loading while Clerk is initializing
   if (!isLoaded) {
@@ -46,7 +47,7 @@ function AuthenticatedApp() {
                   <span className="heading-1 text-xl">CodeCraft</span>
                 </Link>
               ) : (
-                <a href="/landing" className="flex items-center space-x-3 group">
+                <a href="/" className="flex items-center space-x-3 group">
                   <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
                     <span className="text-white font-bold text-lg">C</span>
                   </div>
@@ -71,7 +72,7 @@ function AuthenticatedApp() {
                   
                   {/* Landing Page Link */}
                   <Link 
-                    to="/landing"
+                    to="/"
                     className="nav-link flex items-center gap-2"
                     activeProps={{
                       className: "nav-link-active"
@@ -98,7 +99,7 @@ function AuthenticatedApp() {
               ) : (
                 <>
                   <Link 
-                    to="/landing"
+                    to="/"
                     className="nav-link flex items-center gap-2"
                     activeProps={{
                       className: "nav-link-active"
