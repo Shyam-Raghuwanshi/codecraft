@@ -1,13 +1,13 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { githubAuth } from '../lib/github-auth'
+import { githubAuth, type GitHubAppInstallation } from '../lib/github-auth'
 import { LoadingSpinner } from '../components'
 import { GithubIcon, CheckIcon, ErrorIcon } from '../lib/icons'
 
 const GitHubInstallationCallbackPage = () => {
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing')
   const [error, setError] = useState<string | null>(null)
-  const [installation, setInstallation] = useState<any>(null)
+  const [installation, setInstallation] = useState<GitHubAppInstallation | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -16,18 +16,27 @@ const GitHubInstallationCallbackPage = () => {
         const urlParams = new URLSearchParams(window.location.search)
         const installationId = urlParams.get('installation_id')
         const setupAction = urlParams.get('setup_action')
-        const state = urlParams.get('state')
+        const state = urlParams.get('state') ?? ''
 
-        if (!installationId || !setupAction || !state) {
+        if (!installationId || !setupAction) {
           throw new Error('Invalid installation callback parameters')
         }
 
         const installationResult = await githubAuth.handleInstallationCallback(installationId, setupAction, state)
-        
+
+        try {
+          localStorage.setItem(
+            'github_latest_installation',
+            JSON.stringify({ ...installationResult, stored_at: new Date().toISOString() })
+          )
+        } catch (storageError) {
+          console.warn('Unable to persist GitHub installation details', storageError)
+        }
+
         setInstallation(installationResult)
         setStatus('success')
         
-        sessionStorage.setItem('github_installation_success', 'true')
+  localStorage.setItem('github_installation_success', 'true')
         
         if (window.opener) {
           window.close()

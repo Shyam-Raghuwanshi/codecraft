@@ -14,14 +14,14 @@ const GitHubCallbackPage = () => {
       try {
         const urlParams = new URLSearchParams(window.location.search)
         const code = urlParams.get('code')
-        const state = urlParams.get('state')
+  const state = urlParams.get('state') ?? ''
         const error = urlParams.get('error')
 
         if (error) {
           throw new Error(error === 'access_denied' ? 'Access denied by user' : `GitHub OAuth error: ${error}`)
         }
 
-        if (!code || !state) {
+        if (!code) {
           throw new Error('Invalid callback parameters')
         }
 

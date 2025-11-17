@@ -107,6 +107,7 @@ const GITHUB_CONFIG = {
   clientId: import.meta.env.VITE_GITHUB_CLIENT_ID || '',
   clientSecret: import.meta.env.VITE_GITHUB_CLIENT_SECRET || '', // Note: In production, this should be on server-side
   appId: import.meta.env.VITE_GITHUB_APP_ID || '', // GitHub App ID for installation flow
+  appSlug: import.meta.env.VITE_GITHUB_APP_SLUG || '',
   get redirectUri() {
     return getRedirectUri()
   },
@@ -124,6 +125,62 @@ const GITHUB_CONFIG = {
   ].join(' '),
   appName: 'CodeCraft',
 } as const
+
+const INSTALLATION_POPUP_FLAG = import.meta.env.VITE_GITHUB_INSTALL_USE_POPUP
+const SHOULD_USE_INSTALL_POPUP =
+  typeof INSTALLATION_POPUP_FLAG === 'string'
+    ? INSTALLATION_POPUP_FLAG.toLowerCase() === 'true'
+    : Boolean(INSTALLATION_POPUP_FLAG)
+
+const STATE_TTL_MS = 10 * 60 * 1000
+type StoredStateRecord = {
+  value: string
+  createdAt: number
+}
+
+const persistState = (key: string, value: string) => {
+  const payload: StoredStateRecord = { value, createdAt: Date.now() }
+  try {
+    localStorage.setItem(key, JSON.stringify(payload))
+  } catch (error) {
+    console.warn(`[GitHubAuth] Unable to persist state for ${key}`, error)
+    localStorage.setItem(key, value)
+  }
+}
+
+const readStoredState = (key: string): StoredStateRecord | null => {
+  const raw = localStorage.getItem(key)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'string') {
+      return { value: parsed, createdAt: 0 }
+    }
+    if (parsed && typeof parsed.value === 'string') {
+      return {
+        value: parsed.value,
+        createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Number(parsed.createdAt) || 0,
+      }
+    }
+  } catch {
+    return { value: raw, createdAt: 0 }
+  }
+
+  return null
+}
+
+const clearStoredState = (key: string) => {
+  localStorage.removeItem(key)
+}
+
+const isStateFresh = (record: StoredStateRecord | null) => {
+  if (!record) return false
+  if (!record.createdAt) return true
+  return Date.now() - record.createdAt < STATE_TTL_MS
+}
 
 // Installation flow types
 export interface GitHubAppInstallation {
@@ -154,6 +211,47 @@ class GitHubAuthError extends Error {
     this.code = code
     this.status = status
   }
+}
+
+const PLACEHOLDER_APP_IDS = ['your_github_app_id_here', 'demo_app_id']
+const PLACEHOLDER_APP_SLUGS = ['your_github_app_slug', 'your_github_app_slug_here', 'demo_app_slug']
+
+export interface GitHubAppInstallUrlOptions {
+  state?: string
+  repositoryIds?: Array<number | string>
+  targetId?: number | string
+  targetType?: 'user' | 'organization'
+  redirectUri?: string
+}
+
+export const getGitHubAppInstallationUrl = (options: GitHubAppInstallUrlOptions = {}): string => {
+  if (!GITHUB_CONFIG.appSlug || PLACEHOLDER_APP_SLUGS.includes(GITHUB_CONFIG.appSlug)) {
+    throw new GitHubAuthError('GitHub App slug is not configured. Please set VITE_GITHUB_APP_SLUG to your GitHub App name (slug).')
+  }
+
+  const baseUrl = `https://github.com/apps/${GITHUB_CONFIG.appSlug}/installations/new`
+  const params = new URLSearchParams()
+
+  const redirectUri = options.redirectUri ?? GITHUB_CONFIG.installationRedirectUri
+  if (redirectUri) {
+    params.set('redirect_uri', redirectUri)
+  }
+
+  if (options.state) {
+    params.set('state', options.state)
+  }
+
+  if (options.targetId && options.targetType) {
+    params.set('target_id', `${options.targetId}`)
+    params.set('target_type', options.targetType)
+  }
+
+  if (options.repositoryIds?.length) {
+    options.repositoryIds.forEach(repoId => params.append('repository_ids[]', `${repoId}`))
+  }
+
+  const query = params.toString()
+  return query ? `${baseUrl}?${query}` : baseUrl
 }
 
 export class GitHubAuthService {
@@ -187,20 +285,33 @@ export class GitHubAuthService {
   async initiateAppInstallation(): Promise<void> {
     try {
       // Check if GitHub App is configured and not a placeholder
-      if (!GITHUB_CONFIG.appId || GITHUB_CONFIG.appId === 'your_github_app_id_here') {
-        throw new GitHubAuthError('GitHub App is not configured yet. Please create a GitHub App first or use OAuth authentication.')
+      if (!GITHUB_CONFIG.appId || PLACEHOLDER_APP_IDS.includes(GITHUB_CONFIG.appId)) {
+        throw new GitHubAuthError('GitHub App ID is missing. Please set VITE_GITHUB_APP_ID to your GitHub App ID.')
       }
 
-      const state = this.generateState()
-      sessionStorage.setItem('github_installation_state', state)
+      if (!GITHUB_CONFIG.appSlug || PLACEHOLDER_APP_SLUGS.includes(GITHUB_CONFIG.appSlug)) {
+        throw new GitHubAuthError('GitHub App slug is not configured. Please set VITE_GITHUB_APP_SLUG to your app name (slug).')
+      }
 
-      // GitHub App installation URL using App ID instead of name
-      // This is more reliable as it uses the actual App ID
-      const installUrl = `https://github.com/apps/install/${GITHUB_CONFIG.appId}?state=${state}`
-      
-      console.log('Opening GitHub App installation URL:', installUrl)
-      
-      // Use popup window for better UX
+  const state = this.generateState()
+  persistState('github_installation_state', state)
+
+      console.info('[GitHubAuth] Generated installation state', { state })
+
+      const installUrl = getGitHubAppInstallationUrl({ state })
+      console.info('[GitHubAuth] Opening GitHub App installation page', { installUrl })
+
+      const launchInSameTab = () => {
+        console.info('[GitHubAuth] Falling back to same-tab installation redirect')
+        window.location.assign(installUrl)
+      }
+
+      // Prefer popup only when explicitly enabled
+      if (!SHOULD_USE_INSTALL_POPUP) {
+        launchInSameTab()
+        return
+      }
+
       const popup = window.open(
         installUrl,
         'github-app-install',
@@ -208,7 +319,9 @@ export class GitHubAuthService {
       )
 
       if (!popup) {
-        throw new GitHubAuthError('Popup blocked. Please allow popups for GitHub App installation.')
+        console.warn('[GitHubAuth] Popup blocked; redirecting in same tab')
+        launchInSameTab()
+        return
       }
 
       // Poll for popup completion
@@ -218,9 +331,9 @@ export class GitHubAuthService {
             clearInterval(checkClosed)
             
             // Check if installation was successful
-            const installationSuccess = sessionStorage.getItem('github_installation_success')
+            const installationSuccess = localStorage.getItem('github_installation_success')
             if (installationSuccess) {
-              sessionStorage.removeItem('github_installation_success')
+              localStorage.removeItem('github_installation_success')
               resolve()
             } else {
               reject(new GitHubAuthError('App installation was cancelled or failed.'))
@@ -250,19 +363,27 @@ export class GitHubAuthService {
   async handleInstallationCallback(installationId: string, setupAction: string, state: string): Promise<GitHubAppInstallation> {
     try {
       // Verify state parameter
-      const storedState = sessionStorage.getItem('github_installation_state')
-      if (!storedState || storedState !== state) {
-        throw new GitHubAuthError('Invalid state parameter. Possible CSRF attack.', 'INVALID_STATE')
+      const storedState = readStoredState('github_installation_state')
+      if (storedState && isStateFresh(storedState)) {
+        if (storedState.value !== state) {
+          throw new GitHubAuthError('Invalid state parameter. Possible CSRF attack.', 'INVALID_STATE')
+        }
+        clearStoredState('github_installation_state')
+      } else {
+        if (storedState) {
+          console.warn('[GitHubAuth] Stored installation state expired. Continuing install callback.')
+          clearStoredState('github_installation_state')
+        } else {
+          console.warn('[GitHubAuth] No stored installation state found. Continuing to support manual install flow.')
+        }
       }
-
-      sessionStorage.removeItem('github_installation_state')
 
       if (setupAction === 'install') {
         // Fetch installation details
         const installation = await this.fetchInstallationDetails(installationId)
         
         // Mark installation as successful
-        sessionStorage.setItem('github_installation_success', 'true')
+  localStorage.setItem('github_installation_success', 'true')
         
         return installation
       } else {
@@ -348,8 +469,8 @@ export class GitHubAuthService {
   }
   async initiateOAuth(): Promise<void> {
     try {
-      const state = this.generateState()
-      sessionStorage.setItem('github_oauth_state', state)
+    const state = this.generateState()
+    persistState('github_oauth_state', state)
 
       const params = new URLSearchParams({
         client_id: GITHUB_CONFIG.clientId,
@@ -435,12 +556,23 @@ export class GitHubAuthService {
   async handleCallback(code: string, state: string): Promise<GitHubAuthToken> {
     try {
       // Verify state parameter
-      const storedState = sessionStorage.getItem('github_oauth_state')
-      if (!storedState || storedState !== state) {
-        throw new GitHubAuthError('Invalid state parameter. Possible CSRF attack.', 'INVALID_STATE')
+      const storedState = readStoredState('github_oauth_state')
+      if (storedState && isStateFresh(storedState)) {
+        if (state && storedState.value !== state) {
+          throw new GitHubAuthError('Invalid state parameter. Possible CSRF attack.', 'INVALID_STATE')
+        }
+        if (!state) {
+          console.warn('[GitHubAuth] OAuth callback missing state value; assuming alternate flow and continuing.')
+        }
+        clearStoredState('github_oauth_state')
+      } else {
+        if (storedState) {
+          console.warn('[GitHubAuth] Stored OAuth state expired, accepting callback to prevent lock-out.')
+          clearStoredState('github_oauth_state')
+        } else {
+          console.warn('[GitHubAuth] OAuth callback received without stored state. Assuming manual auth flow.')
+        }
       }
-
-      sessionStorage.removeItem('github_oauth_state')
 
       // Exchange code for access token
       const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {

@@ -17,3 +17,4 @@ export {
   notifications 
 } from './NotificationContainer';
 export { default as AddRepositoryModal, type AddRepositoryModalProps } from './AddRepositoryModal';
+export { default as GitHubAppInstallationModal, type GitHubAppInstallationModalProps } from './GitHubAppInstallationModal';

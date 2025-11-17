@@ -7,6 +7,7 @@
 import React, { useState, useEffect } from 'react'
 import { GithubIcon, CloseIcon, RefreshIcon, CheckIcon, ErrorIcon, ShieldIcon } from '../lib/icons'
 import { useGitHubAuth, type GitHubRepository } from '../lib/github-auth'
+import GitHubAppInstallationModal from './GitHubAppInstallationModal'
 
 export interface AddRepositoryModalProps {
   isOpen: boolean
@@ -34,6 +35,7 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
   const [repoLoading, setRepoLoading] = useState(false)
   const [showRepositoryPicker, setShowRepositoryPicker] = useState(false)
   const [selectedRepositories, setSelectedRepositories] = useState<GitHubRepository[]>([])
+  const [isInstallationModalOpen, setIsInstallationModalOpen] = useState(false)
 
   const { isAuthenticated, user, signIn, fetchRepositories } = useGitHubAuth()
 
@@ -46,6 +48,8 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
       setRepositoryAccess({ type: 'all' })
       setSelectedRepositories([])
       setShowRepositoryPicker(false)
+    } else {
+      setIsInstallationModalOpen(false)
     }
   }, [isOpen])
 
@@ -105,7 +109,16 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
     })
   }
 
-  const handleProceedToRepositorySelection = () => {
+  const handleOpenInstallationGuide = () => {
+    setIsInstallationModalOpen(true)
+  }
+
+  const handleInstallationModalClose = () => {
+    setIsInstallationModalOpen(false)
+  }
+
+  const handleInstallationSuccess = () => {
+    setIsInstallationModalOpen(false)
     setCurrentStep('select')
   }
 
@@ -130,10 +143,11 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
   if (!isOpen) return null
 
   return (
-    <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in"
-      onClick={(e) => e.target === e.currentTarget && !isLoading && !repoLoading && onClose()}
-    >
+    <>
+      <div 
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in"
+        onClick={(e) => e.target === e.currentTarget && !isLoading && !repoLoading && onClose()}
+      >
       <div 
         className="bg-slate-800 rounded-xl shadow-2xl border border-slate-700 w-full max-w-2xl mx-4 animate-scale-in max-h-[90vh] flex flex-col"
         onKeyDown={handleKeyDown}
@@ -351,7 +365,7 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
                   </div>
 
                   <button
-                    onClick={handleProceedToRepositorySelection}
+                    onClick={handleOpenInstallationGuide}
                     disabled={repositoryAccess.type === 'selected' && selectedRepositories.length === 0}
                     className="w-full max-w-lg mx-auto bg-green-600 hover:bg-green-700 disabled:bg-slate-600 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed block"
                   >
@@ -497,7 +511,16 @@ const AddRepositoryModal: React.FC<AddRepositoryModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+      </div>
+
+      <GitHubAppInstallationModal
+        isOpen={isInstallationModalOpen}
+        onClose={handleInstallationModalClose}
+        repositoryAccess={repositoryAccess.type}
+        selectedRepositories={selectedRepositories}
+        onSuccess={handleInstallationSuccess}
+      />
+    </>
   )
 }
 

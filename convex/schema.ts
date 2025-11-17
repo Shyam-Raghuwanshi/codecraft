@@ -71,4 +71,22 @@ export default defineSchema({
     .index("by_user", ["userId"]) // Index for getting user's saved reviews
     .index("by_review", ["reviewId"]) // Index for checking if review is saved
     .index("by_saved_at", ["savedAt"]), // Index for sorting by save date
+
+  installations: defineTable({
+    userId: v.id("users"),
+    installationId: v.number(),
+    accountLogin: v.string(),
+    accountId: v.number(),
+    accountType: v.string(),
+    repositorySelection: v.union(v.literal("all"), v.literal("selected")),
+    appSlug: v.string(),
+    targetType: v.string(),
+    permissions: v.record(v.string(), v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    installationCreatedAt: v.optional(v.string()),
+    installationUpdatedAt: v.optional(v.string()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_installation", ["installationId"]),
 });

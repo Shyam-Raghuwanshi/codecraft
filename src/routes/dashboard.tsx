@@ -13,7 +13,9 @@ import {
 } from '../lib/icons'
 import { StatCard } from '../components/StatCard'
 import { Badge } from '../components/Badge'
-import { AddRepositoryModal, showNotification } from '../components'
+import { AddRepositoryModal, showNotification, LoadingSpinner } from '../components'
+import { useGitHubAuth } from '../lib/github-auth'
+import type { GitHubRepository } from '../lib/github-auth'
 import { analyzeRepo } from '../server/functions'
 import { useDashboardStats, useUserReviews, useSaveReview } from '../lib/convex-hooks'
 
@@ -33,6 +35,13 @@ interface Repository {
 
 interface RepositoryCardProps {
   repository: Repository
+}
+
+interface InstallationRepoEntry {
+  installationId: number
+  accountLogin: string
+  repositorySelection: 'all' | 'selected'
+  repositories: GitHubRepository[]
 }
 
 // Repository Card Component with dark theme
@@ -236,6 +245,84 @@ const DashboardPage = () => {
   // Modal state for adding repositories
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isInstallingApp, setIsInstallingApp] = useState(false)
+  const [installationRepos, setInstallationRepos] = useState<InstallationRepoEntry[]>([])
+  const [isLoadingInstallationRepos, setIsLoadingInstallationRepos] = useState(false)
+  const [installationRepoError, setInstallationRepoError] = useState<string | null>(null)
+
+  const {
+    installApp,
+    fetchInstallationRepositories,
+    fetchUserInstallations,
+    isAuthenticated: isGitHubAuthenticated,
+  } = useGitHubAuth()
+
+  const handleConnectRepository = async () => {
+    try {
+      setIsInstallingApp(true)
+      await installApp()
+      setIsModalOpen(true)
+    } catch (error) {
+      console.error('GitHub App installation failed:', error)
+      showNotification({
+        type: 'error',
+        title: 'GitHub App Installation Failed',
+        message: error instanceof Error ? error.message : 'Unable to open GitHub installation. Please try again.',
+      })
+    } finally {
+      setIsInstallingApp(false)
+    }
+  }
+
+  const refreshInstallationRepos = useCallback(async () => {
+    if (!isGitHubAuthenticated) {
+      setInstallationRepoError('Connect GitHub via OAuth to list accessible repositories.')
+      setInstallationRepos([])
+      return
+    }
+
+    try {
+      setIsLoadingInstallationRepos(true)
+      setInstallationRepoError(null)
+
+      const installations = await fetchUserInstallations()
+      if (!installations.length) {
+        setInstallationRepos([])
+        return
+      }
+
+      const entries: InstallationRepoEntry[] = []
+
+      for (const installation of installations) {
+        try {
+          const repositories = await fetchInstallationRepositories(installation.id.toString())
+          entries.push({
+            installationId: installation.id,
+            accountLogin: installation.account.login,
+            repositorySelection: installation.repository_selection,
+            repositories,
+          })
+        } catch (error) {
+          console.error('Failed to fetch repositories for installation', installation.id, error)
+          setInstallationRepoError('Unable to fetch some repositories. Please refresh.')
+        }
+      }
+
+      setInstallationRepos(entries)
+    } catch (error) {
+      console.error('Failed to load GitHub installations', error)
+      setInstallationRepoError(
+        error instanceof Error ? error.message : 'Failed to load GitHub installations.'
+      )
+      setInstallationRepos([])
+    } finally {
+      setIsLoadingInstallationRepos(false)
+    }
+  }, [
+    fetchInstallationRepositories,
+    fetchUserInstallations,
+    isGitHubAuthenticated,
+  ])
 
   // Convert reviews to repositories for display
   const convertReviewsToRepositories = useCallback((reviews: any[]): Repository[] => {
@@ -354,6 +441,15 @@ const DashboardPage = () => {
     }
   }, [allReviews, convertReviewsToRepositories])
 
+  React.useEffect(() => {
+    if (isGitHubAuthenticated) {
+      refreshInstallationRepos()
+    } else {
+      setInstallationRepos([])
+      setInstallationRepoError(null)
+    }
+  }, [isGitHubAuthenticated, refreshInstallationRepos])
+
   // Handle loading and error states
   React.useEffect(() => {
     if (statsError || statsErrorMessage) {
@@ -429,10 +525,11 @@ const DashboardPage = () => {
           
           <button 
             className="btn btn-primary btn-lg glow-blue whitespace-nowrap"
-            onClick={() => setIsModalOpen(true)}
+            onClick={handleConnectRepository}
+            disabled={isInstallingApp}
           >
             <GithubIcon size="sm" />
-            <span>Connect Repository</span>
+            <span>{isInstallingApp ? 'Waiting for GitHub…' : 'Connect Repository'}</span>
           </button>
         </div>
       </div>
@@ -471,6 +568,94 @@ const DashboardPage = () => {
           color="success"
           trend={{ value: 23, isPositive: true, label: "great progress!" }}
         />
+      </div>
+
+      {/* GitHub App Access Section */}
+      <div className="card border border-slate-800 bg-slate-900/60 p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="heading-2 mb-1">GitHub App Access</h2>
+            <p className="text-slate-400 text-sm">
+              Repositories CodeCraft can read based on your GitHub App installations
+            </p>
+          </div>
+          <button
+            className="btn btn-secondary btn-sm whitespace-nowrap"
+            onClick={refreshInstallationRepos}
+            disabled={isLoadingInstallationRepos || !isGitHubAuthenticated}
+          >
+            <RefreshIcon size="sm" color="secondary" />
+            <span>{isLoadingInstallationRepos ? 'Refreshing…' : 'Refresh list'}</span>
+          </button>
+        </div>
+
+        {installationRepoError && (
+          <p className="text-sm text-red-300">{installationRepoError}</p>
+        )}
+
+        {!isGitHubAuthenticated ? (
+          <p className="text-slate-400 text-sm">
+            Authenticate with GitHub to load the repositories granted via your installations.
+          </p>
+        ) : isLoadingInstallationRepos ? (
+          <div className="flex items-center space-x-3 text-slate-200">
+            <LoadingSpinner size="sm" />
+            <span>Fetching repositories…</span>
+          </div>
+        ) : installationRepos.length === 0 ? (
+          <p className="text-slate-400 text-sm">
+            No GitHub App installations detected yet. Install CodeCraft on your GitHub account to grant access.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {installationRepos.map((entry) => {
+              const displayedRepos = entry.repositories.slice(0, 12)
+              const remaining = entry.repositories.length - displayedRepos.length
+              return (
+                <div
+                  key={entry.installationId}
+                  className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div>
+                      <p className="text-slate-200 font-medium">@{entry.accountLogin}</p>
+                      <p className="text-xs text-slate-400">
+                        Access: {entry.repositorySelection === 'all' ? 'All repositories' : 'Selected repositories'}
+                      </p>
+                    </div>
+                    <Badge
+                      type="info"
+                      variant="ghost"
+                      label={`${entry.repositories.length} repo${entry.repositories.length === 1 ? '' : 's'}`}
+                    />
+                  </div>
+                  {displayedRepos.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No repositories returned for this installation yet.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {displayedRepos.map((repo) => (
+                        <a
+                          key={repo.id}
+                          href={repo.html_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-slate-300 border border-slate-700 rounded-full px-3 py-1 hover:border-blue-500 hover:text-blue-300 transition"
+                        >
+                          {repo.full_name}
+                        </a>
+                      ))}
+                      {remaining > 0 && (
+                        <span className="text-xs text-slate-500">+{remaining} more…</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Repository List Section */}
@@ -535,10 +720,11 @@ const DashboardPage = () => {
             
             <button 
               className="btn btn-primary btn-lg glow-blue"
-              onClick={() => setIsModalOpen(true)}
+              onClick={handleConnectRepository}
+              disabled={isInstallingApp}
             >
               <GithubIcon size="sm" />
-              Connect GitHub
+              {isInstallingApp ? 'Waiting for GitHub…' : 'Connect GitHub'}
             </button>
           </div>
         ) : (

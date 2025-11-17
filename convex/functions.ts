@@ -1,19 +1,345 @@
+import { createSign } from "node:crypto";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
+import { action, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { api } from "./_generated/api";
+import type { Doc, Id } from "./_generated/dataModel";
 
-// === USER MANAGEMENT ===
+type WithDatabase = Pick<QueryCtx, "db"> | Pick<MutationCtx, "db">;
+
+type GitHubInstallationRepository = {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  description: string | null;
+  owner: {
+    login: string;
+    id: number;
+  };
+  permissions?: Record<string, boolean>;
+  updated_at?: string;
+  pushed_at?: string;
+  default_branch?: string;
+};
+
+const API_TIMEOUT_MS = 30_000;
+const MAX_API_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 500;
+const API_RATE_LIMIT_DELAY_MS = 500;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const wrapError = (message: string, error: unknown) => {
+  const detail = error instanceof Error ? error.message : "Unknown error";
+  return new Error(`${message}: ${detail}`);
+};
+
+const findUserByClerkId = async (
+  ctx: WithDatabase,
+  clerkId: string
+): Promise<Doc<"users"> | null> =>
+  ctx.db.query("users").withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId)).first();
+
+const getUserOrThrow = async (ctx: WithDatabase, clerkId: string) => {
+  const user = await findUserByClerkId(ctx, clerkId);
+  if (!user) {
+    throw new Error("User not found");
+  }
+  return user;
+};
+
+const fetchWithTimeout = async (url: string, init?: RequestInit) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${API_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const retryWithBackoff = async <T>(fn: () => Promise<T>, attempt = 0): Promise<T> => {
+  try {
+    return await fn();
+  } catch (error) {
+    if (attempt >= MAX_API_RETRIES - 1) {
+      throw error;
+    }
+
+    const status = error instanceof Response ? error.status : null;
+    const shouldRetry = status === null || status === 429 || status >= 500;
+
+    if (!shouldRetry) {
+      throw error;
+    }
+
+    const delay =
+      status === 429
+        ? API_RATE_LIMIT_DELAY_MS * (attempt + 1)
+        : RETRY_BASE_DELAY_MS * 2 ** attempt;
+
+    await wait(delay);
+    return retryWithBackoff(fn, attempt + 1);
+  }
+};
+
+const fetchJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
+  const response = await fetchWithTimeout(url, init);
+
+  if (response.status === 429) {
+    throw response;
+  }
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`GitHub API request failed: ${response.status} ${errorBody}`);
+  }
+
+  return response.json();
+};
+
+const normalizePrivateKey = (key: string) => {
+  if (key.includes("BEGIN") && key.includes("END")) {
+    return key.replace(/\\n/g, "\n");
+  }
+
+  const normalized = key.replace(/\\n/g, "\n");
+  return `-----BEGIN PRIVATE KEY-----\n${normalized}\n-----END PRIVATE KEY-----`;
+};
+
+const getGitHubAppConfig = () => {
+  const appId = process.env.GITHUB_APP_ID || process.env.VITE_GITHUB_APP_ID;
+  const rawPrivateKey = process.env.GITHUB_APP_PRIVATE_KEY || process.env.VITE_GITHUB_APP_PRIVATE_KEY;
+
+  if (!appId || !rawPrivateKey) {
+    throw new Error("GitHub App credentials are not configured on the server.");
+  }
+
+  return {
+    appId,
+    privateKey: normalizePrivateKey(rawPrivateKey),
+  };
+};
+
+const createAppJwt = () => {
+  const { appId, privateKey } = getGitHubAppConfig();
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iat: now - 60,
+    exp: now + 600,
+    iss: appId,
+  };
+
+  const header = { alg: "RS256", typ: "JWT" };
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+
+  const signingInput = `${encode(header)}.${encode(payload)}`;
+  const signer = createSign("RSA-SHA256");
+  signer.update(signingInput);
+  signer.end();
+
+  const signature = signer.sign(privateKey, "base64url");
+  return `${signingInput}.${signature}`;
+};
+
+const createInstallationAccessToken = async (installationId: number): Promise<string> => {
+  const jwt = createAppJwt();
+
+  const response = await fetch(
+    `https://api.github.com/app/installations/${installationId}/access_tokens`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "CodeCraft-App",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Failed to create installation access token: ${response.status} ${errorBody}`
+    );
+  }
+
+  const data = await response.json();
+  return data.token;
+};
+
+export const saveInstallation = mutation({
+  args: {
+    clerkId: v.string(),
+    installationId: v.number(),
+    accountLogin: v.string(),
+    accountId: v.number(),
+    accountType: v.string(),
+    repositorySelection: v.union(v.literal("all"), v.literal("selected")),
+    appSlug: v.string(),
+    targetType: v.string(),
+    permissions: v.record(v.string(), v.string()),
+    installationCreatedAt: v.optional(v.string()),
+    installationUpdatedAt: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    try {
+      const user = await getUserOrThrow(ctx, args.clerkId);
+      const now = Date.now();
+
+      const existing = await ctx.db
+        .query("installations")
+        .withIndex("by_installation", (q) => q.eq("installationId", args.installationId))
+        .first();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          userId: user._id,
+          accountLogin: args.accountLogin,
+          accountId: args.accountId,
+          accountType: args.accountType,
+          repositorySelection: args.repositorySelection,
+          appSlug: args.appSlug,
+          targetType: args.targetType,
+          permissions: args.permissions,
+          updatedAt: now,
+          installationUpdatedAt: args.installationUpdatedAt,
+        });
+        return existing._id;
+      }
+
+      return ctx.db.insert("installations", {
+        userId: user._id,
+        installationId: args.installationId,
+        accountLogin: args.accountLogin,
+        accountId: args.accountId,
+        accountType: args.accountType,
+        repositorySelection: args.repositorySelection,
+        appSlug: args.appSlug,
+        targetType: args.targetType,
+        permissions: args.permissions,
+        createdAt: now,
+        updatedAt: now,
+        installationCreatedAt: args.installationCreatedAt,
+        installationUpdatedAt: args.installationUpdatedAt,
+      });
+    } catch (error) {
+      throw wrapError("Failed to save installation", error);
+    }
+  },
+});
+
+export const getInstallations = query({
+  args: {
+    clerkId: v.string(),
+  },
+  handler: async (ctx, { clerkId }) => {
+    try {
+      const user = await findUserByClerkId(ctx, clerkId);
+      if (!user) {
+        return [];
+      }
+
+      return ctx.db
+        .query("installations")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .collect();
+    } catch (error) {
+      throw wrapError("Failed to fetch installations", error);
+    }
+  },
+});
+
+export const removeInstallation = mutation({
+  args: {
+    clerkId: v.string(),
+    installationId: v.number(),
+  },
+  handler: async (ctx, { clerkId, installationId }) => {
+    try {
+      const user = await getUserOrThrow(ctx, clerkId);
+      const installation = await ctx.db
+        .query("installations")
+        .withIndex("by_installation", (q) => q.eq("installationId", installationId))
+        .first();
+
+      if (!installation || installation.userId !== user._id) {
+        throw new Error("Installation not found or access denied");
+      }
+
+      await ctx.db.delete(installation._id);
+      return { success: true };
+    } catch (error) {
+      throw wrapError("Failed to remove installation", error);
+    }
+  },
+});
+
+export const fetchInstallationRepositories = action({
+  args: {
+    clerkId: v.string(),
+    installationId: v.number(),
+    perPage: v.optional(v.number()),
+    page: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    { clerkId, installationId, perPage = 100, page = 1 }
+  ): Promise<{
+    installation: Doc<"installations">;
+    repositories: GitHubInstallationRepository[];
+    totalCount: number;
+    page: number;
+    perPage: number;
+  }> => {
+    "use node";
+
+    try {
+      const installations = await ctx.runQuery(api.functions.getInstallations, { clerkId });
+      const installation = installations.find((entry) => entry.installationId === installationId);
+
+      if (!installation) {
+        throw new Error("Installation not found for this user");
+      }
+
+      const token = await createInstallationAccessToken(installationId);
+      const data = await retryWithBackoff(() =>
+        fetchJson<{ total_count?: number; repositories?: GitHubInstallationRepository[] }>(
+          `https://api.github.com/installation/repositories?per_page=${perPage}&page=${page}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "User-Agent": "CodeCraft-App",
+            },
+          }
+        )
+      );
+
+      return {
+        installation,
+        repositories: data.repositories ?? [],
+        totalCount: data.total_count ?? data.repositories?.length ?? 0,
+        page,
+        perPage,
+      };
+    } catch (error) {
+      throw wrapError("Failed to fetch installation repositories", error);
+    }
+  },
+});
 
 /**
- * Save or update        } catch (error) {
-      console.error("Error saving review:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      throw new Error(`Failed to save review: ${errorMessage}`);
-    }tch (error) {
-      console.error("Error saving review:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      throw new Error(`Failed to save review: ${errorMessage}`);
-    }r information when they sign in with Clerk
+ * Save or update base user information when they sign in with Clerk
  */
 export const saveUserReview = mutation({
   args: {
@@ -22,31 +348,22 @@ export const saveUserReview = mutation({
   },
   handler: async (ctx, { clerkId, email }) => {
     try {
-      // Check if user already exists
-      const existingUser = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
+      const existingUser = await findUserByClerkId(ctx, clerkId);
 
       if (existingUser) {
-        // Update existing user's email if changed
         if (existingUser.email !== email) {
           await ctx.db.patch(existingUser._id, { email });
         }
         return existingUser._id;
       }
 
-      // Create new user
-      const userId = await ctx.db.insert("users", {
+      return ctx.db.insert("users", {
         clerkId,
         email,
         createdAt: Date.now(),
       });
-
-      return userId;
     } catch (error) {
-      console.error("Error saving user:", error);
-      throw new Error("Failed to save user information");
+      throw wrapError("Failed to save user", error);
     }
   },
 });
@@ -100,60 +417,26 @@ export const saveReview = mutation({
   },
   handler: async (ctx, { clerkId, repoName, repoUrl, reviewData }) => {
     try {
-      // Validate input
-      if (!clerkId || !repoName || !reviewData) {
-        throw new Error("Missing required fields");
+      if (!repoName.trim() || !repoUrl.trim()) {
+        throw new Error("Repository information is required");
       }
 
-      // Find user by Clerk ID
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
+      const user = await getUserOrThrow(ctx, clerkId);
 
-      if (!user) {
-        throw new Error("User not found. Please sign in again.");
-      }
-
-      // Check if review already exists for this repo (prevent duplicates)
-      const existingReview = await ctx.db
-        .query("reviews")
-        .withIndex("by_user", (q) => q.eq("userId", user._id))
-        .filter((q) => q.eq(q.field("repoName"), repoName))
-        .first();
-
-      if (existingReview) {
-        // Update existing review with new data
-        await ctx.db.patch(existingReview._id, {
-          repoUrl,
-          reviewData,
-          createdAt: Date.now(), // Update timestamp
-        });
-        return existingReview._id;
-      }
-
-      // Create new review
-      const reviewId = await ctx.db.insert("reviews", {
+      return ctx.db.insert("reviews", {
         userId: user._id,
         repoName,
         repoUrl,
         reviewData,
         createdAt: Date.now(),
       });
-
-      return reviewId;
     } catch (error) {
-      console.error("Error saving review:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      throw new Error(`Failed to save review: ${errorMessage}`);
+      throw wrapError("Failed to save review", error);
     }
   },
 });
 
-/**
- * Save a review to user's saved list
- */
-export const saveUserReviewToList = mutation({
+export const saveReviewForLater = mutation({
   args: {
     clerkId: v.string(),
     reviewId: v.id("reviews"),
@@ -161,46 +444,39 @@ export const saveUserReviewToList = mutation({
   },
   handler: async (ctx, { clerkId, reviewId, notes }) => {
     try {
-      // Find user
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
+      const user = await getUserOrThrow(ctx, clerkId);
+      const review = await ctx.db.get(reviewId);
 
-      if (!user) {
-        throw new Error("User not found");
+      if (!review || review.userId !== user._id) {
+        throw new Error("Review not found or access denied");
       }
 
-      // Check if already saved
-      const existingSave = await ctx.db
+      const existing = await ctx.db
         .query("savedReviews")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
         .filter((q) => q.eq(q.field("reviewId"), reviewId))
         .first();
 
-      if (existingSave) {
-        throw new Error("Review already saved");
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          notes,
+          savedAt: Date.now(),
+        });
+        return existing._id;
       }
 
-      // Save review
-      const savedReviewId = await ctx.db.insert("savedReviews", {
+      return ctx.db.insert("savedReviews", {
         userId: user._id,
         reviewId,
         savedAt: Date.now(),
         notes,
       });
-
-      return savedReviewId;
-    } catch (error:any) {
-      console.error("Error saving review to list:", error);
-      throw new Error(`Failed to save review: ${error.message}`);
+    } catch (error) {
+      throw wrapError("Failed to save review", error);
     }
   },
 });
 
-/**
- * Remove a review from user's saved list
- */
 export const removeSavedReview = mutation({
   args: {
     clerkId: v.string(),
@@ -208,17 +484,8 @@ export const removeSavedReview = mutation({
   },
   handler: async (ctx, { clerkId, reviewId }) => {
     try {
-      // Find user
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
+      const user = await getUserOrThrow(ctx, clerkId);
 
-      if (!user) {
-        throw new Error("User not found");
-      }
-
-      // Find saved review
       const savedReview = await ctx.db
         .query("savedReviews")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -229,13 +496,10 @@ export const removeSavedReview = mutation({
         throw new Error("Saved review not found");
       }
 
-      // Remove saved review
       await ctx.db.delete(savedReview._id);
       return { success: true };
     } catch (error) {
-      console.error("Error removing saved review:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      throw new Error(`Failed to remove saved review: ${errorMessage}`);
+      throw wrapError("Failed to remove saved review", error);
     }
   },
 });
@@ -270,8 +534,7 @@ export const getUserReviews = query({
 
       return reviews;
     } catch (error) {
-      console.error("Error getting user reviews:", error);
-      throw new Error("Failed to get user reviews");
+      throw wrapError("Failed to fetch user reviews", error);
     }
   },
 });
@@ -285,38 +548,27 @@ export const getSavedReviews = query({
   },
   handler: async (ctx, { clerkId }) => {
     try {
-      // Find user
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
-
+      const user = await findUserByClerkId(ctx, clerkId);
       if (!user) {
         return [];
       }
 
-      // Get saved reviews
       const savedReviews = await ctx.db
         .query("savedReviews")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
         .order("desc")
         .collect();
 
-      // Fetch full review data for each saved review
       const reviewsWithData = await Promise.all(
-        savedReviews.map(async (saved) => {
-          const review = await ctx.db.get(saved.reviewId);
-          return {
-            ...saved,
-            review,
-          };
-        })
+        savedReviews.map(async (saved) => ({
+          ...saved,
+          review: await ctx.db.get(saved.reviewId),
+        }))
       );
 
       return reviewsWithData.filter((item) => item.review !== null);
     } catch (error) {
-      console.error("Error getting saved reviews:", error);
-      throw new Error("Failed to get saved reviews");
+      throw wrapError("Failed to fetch saved reviews", error);
     }
   },
 });
@@ -330,12 +582,7 @@ export const getReviewStats = query({
   },
   handler: async (ctx, { clerkId }) => {
     try {
-      // Find user
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
-
+      const user = await findUserByClerkId(ctx, clerkId);
       if (!user) {
         return {
           totalReviews: 0,
@@ -350,43 +597,48 @@ export const getReviewStats = query({
         };
       }
 
-      // Get all reviews
       const reviews = await ctx.db
         .query("reviews")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
         .collect();
 
-      // Get saved reviews count
       const savedReviews = await ctx.db
         .query("savedReviews")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
         .collect();
 
-      // Calculate aggregated statistics
-      let totalIssuesFound = 0;
-      let criticalIssues = 0;
-      let majorIssues = 0;
-      let minorIssues = 0;
-      let qualityScores: number[] = [];
+      const totals = reviews.reduce(
+        (acc, review) => {
+          const summary = review.reviewData.summary;
+          acc.totalIssuesFound += summary.totalIssues;
+          acc.criticalIssues += summary.criticalIssues;
+          acc.majorIssues += summary.majorIssues;
+          acc.minorIssues += summary.minorIssues;
 
-      reviews.forEach((review) => {
-        const summary = review.reviewData.summary;
-        totalIssuesFound += summary.totalIssues;
-        criticalIssues += summary.criticalIssues;
-        majorIssues += summary.majorIssues;
-        minorIssues += summary.minorIssues;
-        
-        if (summary.codeQualityScore) {
-          qualityScores.push(summary.codeQualityScore);
+          if (typeof summary.codeQualityScore === "number") {
+            acc.qualityScores.push(summary.codeQualityScore);
+          }
+
+          return acc;
+        },
+        {
+          totalIssuesFound: 0,
+          criticalIssues: 0,
+          majorIssues: 0,
+          minorIssues: 0,
+          qualityScores: [] as number[],
         }
-      });
+      );
 
-      const avgCodeQuality = qualityScores.length > 0 
-        ? Math.round(qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length)
+      const avgCodeQuality = totals.qualityScores.length
+        ? Math.round(
+            totals.qualityScores.reduce((sum, score) => sum + score, 0) /
+              totals.qualityScores.length
+          )
         : 0;
 
-      // Get recent activity (last 5 reviews)
       const recentActivity = reviews
+        .slice()
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 5)
         .map((review) => ({
@@ -398,18 +650,17 @@ export const getReviewStats = query({
 
       return {
         totalReviews: reviews.length,
-        totalIssuesFound,
-        criticalIssues,
-        majorIssues,
-        minorIssues,
+        totalIssuesFound: totals.totalIssuesFound,
+        criticalIssues: totals.criticalIssues,
+        majorIssues: totals.majorIssues,
+        minorIssues: totals.minorIssues,
         avgCodeQuality,
         savedReviews: savedReviews.length,
         recentActivity,
-        lastUpdated: Date.now(), // Add timestamp for real-time tracking
+        lastUpdated: Date.now(),
       };
     } catch (error) {
-      console.error("Error getting review stats:", error);
-      throw new Error("Failed to get review statistics");
+      throw wrapError("Failed to fetch review statistics", error);
     }
   },
 });
@@ -552,29 +803,13 @@ export const getReview = query({
   },
   handler: async (ctx, { reviewId, clerkId }) => {
     try {
-      // Find user
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-        .first();
-
-      if (!user) {
-        throw new Error("User not found");
-      }
-
-      // Get review
+      const user = await getUserOrThrow(ctx, clerkId);
       const review = await ctx.db.get(reviewId);
 
-      if (!review) {
-        throw new Error("Review not found");
+      if (!review || review.userId !== user._id) {
+        throw new Error("Review not found or access denied");
       }
 
-      // Check if user owns this review
-      if (review.userId !== user._id) {
-        throw new Error("Access denied");
-      }
-
-      // Check if review is saved by user
       const savedReview = await ctx.db
         .query("savedReviews")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -583,13 +818,11 @@ export const getReview = query({
 
       return {
         ...review,
-        isSaved: !!savedReview,
+        isSaved: Boolean(savedReview),
         savedNotes: savedReview?.notes,
       };
     } catch (error) {
-      console.error("Error getting review:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      throw new Error(`Failed to get review: ${errorMessage}`);
+      throw wrapError("Failed to fetch review", error);
     }
   },
 });
